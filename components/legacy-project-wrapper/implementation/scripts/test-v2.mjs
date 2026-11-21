@@ -33,6 +33,7 @@
 //                                         is open when hosted
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
 //                                           also uses <port>+1 for the second-server check)
+//        node scripts/test-v2.mjs --storage-only   (in-process storage regressions, no server or port)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
@@ -44,8 +45,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
+const STORAGE_ONLY = process.argv.includes("--storage-only");
 const PORT = Number(process.argv[2]);
-if (!Number.isInteger(PORT) || PORT === 3100) {
+if (!STORAGE_ONLY && (!Number.isInteger(PORT) || PORT === 3100)) {
   console.error("usage: node scripts/test-v2.mjs <port> (not 3100)");
   process.exit(2);
 }
@@ -55,7 +57,7 @@ if (path.resolve(ROOT) === path.join(os.homedir(), "liminal/align")) {
   console.error(`test-v2: refusing the main checkout ${ROOT}; run from a worktree`);
   process.exit(2);
 }
-if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
+if (!STORAGE_ONLY && spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   console.error(`test-v2: port ${PORT} is already in use`);
   process.exit(2);
 }
@@ -400,11 +402,13 @@ for (const setup of ["touch", "session"]) {
         const closed = db.domain;
         const pending = previewTx(() => { called = true; });
         assert.equal(closed.isTransaction, true);
+        const queued = tx(() => 42);
         // A real lifecycle failure: close after BEGIN and before native createSession, without replacing any db method.
         closed.close();
         await assert.rejects(pending, (error) => error.code === "ERR_INVALID_STATE" && /database is not open/.test(error.message));
         assert.equal(inPreview(), false);
         assert.notEqual(db.domain, closed); // The safety net replaced the closed connection and cleared statements.
+        assert.equal(await queued, 42); // A waiter must pick up the replacement connection.
       }
       assert.equal(called, false);
       assert.equal(inPreview(), false);
@@ -462,7 +466,163 @@ for (const setup of ["touch", "session"]) {
   `, setup], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `setup-${setup}`) } });
   check(`storage: ${setup} setup failure cleans up; later tx commits and rolls back, previews work and inPreview resets`, regression.status === 0, regression.stdout + regression.stderr);
 }
-if (process.argv.includes("--tx-setup-only")) {
+for (const first of ["tx", "mixed", "preview"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, all, run, tx, previewTx, inPreview, onWsChange, touchWs, captureOutbound } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_concurrent_test (id TEXT PRIMARY KEY)");
+    const first = process.argv[1];
+    const events = [];
+    const stop = onWsChange((ws) => events.push(ws));
+    try {
+      const ids = Array.from({ length: 64 }, (_, i) => String(i));
+      const previewIds = new Set(first === "tx" ? [] : ids.filter((_, i) => i % 3 === (first === "preview" ? 0 : 1)));
+      const outcomes = await Promise.allSettled(ids.map(id => {
+        const body = () => {
+          assert.equal(db.domain.isTransaction, true);
+          assert.equal(inPreview(), previewIds.has(id));
+          run("INSERT INTO v2_concurrent_test VALUES (?)", id);
+          touchWs(id);
+          if (previewIds.has(id)) captureOutbound({ kind: "mail", what: id });
+          return id;
+        };
+        return previewIds.has(id) ? previewTx(body) : tx(body);
+      }));
+      const failures = outcomes.filter(r => r.status === "rejected");
+      assert.equal(failures.length, 0, failures.length + " starts failed: " + failures[0]?.reason);
+      for (let i = 0; i < ids.length; i++) {
+        const result = outcomes[i].value;
+        if (previewIds.has(ids[i])) {
+          assert.equal(result.ok, true);
+          assert.equal(result.value, ids[i]);
+          assert.equal(result.changes.length, 1);
+          assert.equal(result.changes[0].after.id, ids[i]);
+          assert.deepEqual(result.outbound, [{ kind: "mail", what: ids[i] }]);
+        } else assert.equal(result, ids[i]);
+      }
+      const committed = ids.filter(id => !previewIds.has(id)).sort();
+      assert.deepEqual(all("SELECT id FROM v2_concurrent_test ORDER BY id").map(r => r.id), committed);
+      assert.deepEqual(events.sort(), committed);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+    } finally {
+      stop();
+      db.domain.close();
+      db.auth.close();
+    }
+  `, first], { cwd: ROOT, encoding: "utf8", timeout: 15_000, env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `concurrent-${first}`) } });
+  check(`storage: concurrent ${first === "tx" ? "tx calls commit each write once" : `tx and preview calls commit only real writes once (${first === "preview" ? "preview" : "tx"} first)`}`, regression.status === 0, regression.stdout + regression.stderr);
+}
+for (const rule of ["nested", "rollback", "busy", "wait", "nonbusy", "reopen"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, all, run, tx, previewTx, inPreview } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_wait_test (id TEXT PRIMARY KEY)");
+    const insert = id => run("INSERT INTO v2_wait_test VALUES (?)", id);
+    const fault = new Error("test transaction failure");
+    const realSetTimeout = globalThis.setTimeout;
+    try {
+      const rule = process.argv[1];
+      if (rule === "nested") {
+        let nested, refused;
+        await tx(() => {
+          nested = tx(() => insert("nested"));
+          refused = assert.rejects(previewTx(() => assert.fail("nested preview ran")), /inside another transaction/);
+        });
+        await Promise.all([nested, refused]);
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["nested"]);
+        const preview = await previewTx(() => {
+          assert.equal(inPreview(), true);
+          nested = tx(() => insert("preview-nested"));
+          refused = assert.rejects(previewTx(() => assert.fail("nested preview ran")), /inside another transaction/);
+        });
+        await Promise.all([nested, refused]);
+        assert.equal(preview.ok, true);
+        assert.equal(preview.changes[0].after.id, "preview-nested");
+      } else if (rule === "rollback") {
+        let nested;
+        const failed = assert.rejects(tx(() => {
+          nested = tx(() => insert("rolled-back"));
+          throw fault;
+        }), e => e === fault);
+        const queued = tx(() => insert("after-throw"));
+        await Promise.all([failed, queued]);
+        await nested;
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["after-throw"]);
+      } else if (rule === "busy" || rule === "wait") {
+        let waits = 0;
+        globalThis.setTimeout = resume => { waits++; queueMicrotask(resume); return 0; };
+        const holder = rule === "busy" ? db.auth : db.domain;
+        for (const start of [tx, previewTx]) {
+          holder.exec("BEGIN IMMEDIATE");
+          waits = 0;
+          await assert.rejects(start(() => assert.fail("body ran before lock release")), rule === "busy" ? /database is locked/ : /Timed out waiting for the domain transaction to finish/);
+          assert.equal(waits, 100);
+          assert.equal(holder.isTransaction, true);
+          holder.exec("ROLLBACK");
+        }
+        if (rule === "busy") {
+          db.auth.exec("BEGIN IMMEDIATE");
+          const pending = tx(() => insert("after-busy"));
+          db.auth.exec("ROLLBACK");
+          await pending;
+        }
+      } else if (rule === "nonbusy") {
+        const original = db.domain.exec;
+        db.domain.exec = () => { throw fault; };
+        try {
+          for (const start of [tx, previewTx]) await assert.rejects(start(() => assert.fail("body ran after BEGIN error")), e => e === fault);
+        } finally {
+          db.domain.exec = original;
+        }
+      } else if (rule === "reopen") {
+        const old = db.domain;
+        const original = old.exec;
+        old.exec = function(sql) {
+          if (sql.startsWith("ROLLBACK")) throw fault;
+          return original.call(this, sql);
+        };
+        const preview = previewTx(() => insert("rolled-back-on-close"));
+        const queued = tx(() => insert("after-reopen"));
+        assert.equal((await preview).ok, true);
+        assert.notEqual(db.domain, old);
+        await queued;
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["after-reopen"]);
+      }
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      await tx(() => insert("later-write"));
+      assert.equal(all("SELECT id FROM v2_wait_test WHERE id = 'later-write'").length, 1);
+      assert.equal(all("SELECT id FROM v2_wait_test WHERE id = 'preview-nested'").length, 0);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      if (db.domain.isOpen) db.domain.close();
+      db.auth.close();
+    }
+  `, rule], { cwd: ROOT, encoding: "utf8", timeout: 15_000, env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `wait-${rule}`) } });
+  check(`storage: transaction wait preserves ${rule} behavior and allows later writes`, regression.status === 0, regression.stdout + regression.stderr);
+}
+if (STORAGE_ONLY || process.argv.includes("--tx-setup-only")) {
   rmSync(tmpRoot, { recursive: true, force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
@@ -912,21 +1072,32 @@ try {
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
   const requiredTables = [
+    "v2_budget_crossings", "v2_budget_stamps", "v2_spend_home_teams", "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups",
     "v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions",
     "v2_change_request_evidence", "v2_change_request_elements", "v2_spend_rollups", "v2_former_members",
     "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits",
     "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets",
     "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports",
     "v2_measure_readings", "v2_reading_credentials", "v2_goal_list_reviews", "v2_goal_list_snoozes", "v2_goal_review_releases",
+    "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions",
+    "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_spend_home_teams", "v2_budget_crossings", "v2_budget_stamps",
     "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings",
     "v2_workspace_decision_services", "v2_device_excerpt_consent", "v2_session_excerpts", "v2_excerpt_readers",
     "v2_excerpt_share_ids", "v2_excerpt_storage_cleanup", "v2_model_send_windows", "v2_model_check_blocks",
     "ba_user", "ba_passkey",
   ];
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 31, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
-    SCHEMA_VERSION === 31 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 34, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 34 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
     requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
+  const budgetIndexes = withDb((d) => [
+    ["v2_budget_requests_requester_created", ["ws_id", "requester_id", "created_at"]],
+    ["v2_budget_requests_created", ["ws_id", "created_at"]],
+    ["v2_budget_requests_goal", ["ws_id", "goal_id"]],
+    ["v2_budget_request_sessions_session", ["ws_id", "session_key"]],
+    ["v2_budget_requests_source_device", ["source_device_id"]],
+  ].every(([name, columns]) => JSON.stringify(d.prepare(`PRAGMA index_info(${name})`).all().map((c) => c.name)) === JSON.stringify(columns)));
+  check("storage: budget request hourly limits and foreign-key child lookups have ordered indexes", budgetIndexes);
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
   check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
@@ -1740,6 +1911,163 @@ try {
   check("spend: a viewer may read spend; the team goal it can't see is in the private row", viewerSpend.rows.some((r) => r.kind === "private") && !viewerSpend.rows.some((r) => r.goal?.id === G2.id), JSON.stringify(viewerSpend.rows.map((r) => r.label)));
   const ranged = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal&from=${encodeURIComponent(new Date().toISOString())}`, { cookie: U1.cookie })).json;
   check("spend: from/to filter by request time", ranged.total.requests === 0 && invariantHolds(ranged), JSON.stringify(ranged.total).slice(0, 100));
+
+  // ---- BEGIN SPEND EXPORT: monthly CSV, report parity, privacy, spreadsheet safety and phone download ----
+  {
+    // A parser independent of the serializer: quoted commas, doubled quotes and embedded newlines stay in one cell.
+    const parseCsv = (text) => {
+      const records = [];
+      let record = [], value = "", quoted = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '"') {
+          if (quoted && text[i + 1] === '"') { value += '"'; i++; }
+          else quoted = !quoted;
+        } else if (!quoted && (c === "," || c === "\r" || c === "\n")) {
+          record.push(value); value = "";
+          if (c !== ",") {
+            records.push(record); record = [];
+            if (c === "\r" && text[i + 1] === "\n") i++;
+          }
+        } else value += c;
+      }
+      if (quoted || value || record.length) throw new Error("CSV has an unfinished record");
+      return records;
+    };
+    const columns = ["month", "team", "requests", "estimated_list_cost_usd", "unpriced_requests", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit"];
+    const moneyMicros = (usd) => { const [whole, fraction] = usd.split("."); return BigInt(whole) * 1_000_000n + BigInt(fraction); };
+    const nums = (row) => row.slice(2).map((v, i) => i === 1 ? moneyMicros(v) : BigInt(v));
+    const sums = (s) => [s.requests, s.est_list_usd_micros, s.unpriced_requests, s.input, s.output, s.cache_read, s.cache_write_5m, s.cache_write_1h, s.cache_write_unsplit].map(BigInt);
+    const csvOf = (u, query = "month=2024-02", ws = A) => call(u.who, "GET", `/api/v2/workspaces/${ws}/spend/export?${query}`, { cookie: u.cookie });
+    const original = withDb((d) => ({
+      usage: d.prepare("SELECT request_key, ts FROM v2_usage WHERE ws_id = ?").all(A),
+      team: d.prepare("SELECT name FROM v2_pods WHERE id = ?").get(P1).name,
+    }));
+    const rollModel = "spend-export-test";
+    try {
+      // Temporary database fixtures, restored below. Include both month edges, leap day and retained usage in each category.
+      withDb((d) => {
+        d.prepare("UPDATE v2_usage SET ts = '2024-02-15T12:00:00.000Z' WHERE ws_id = ?").run(A);
+        for (const [request, ts] of [["r1", "2024-01-31T23:59:59.999Z"], ["r2", "2024-02-01T00:00:00.000Z"], ["r3", "2024-02-29T23:59:59.999Z"], ["r4", "2024-03-01T00:00:00.000Z"]]) {
+          d.prepare("UPDATE v2_usage SET ts = ? WHERE ws_id = ? AND request_key = ?").run(ts, A, reqKey(D3, request));
+        }
+        const insert = d.prepare("INSERT INTO v2_spend_rollups (ws_id, goal_id, day, model, basis, requests, input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, est_list_usd_micros, unpriced_requests) VALUES (?, ?, ?, ?, 'unknown', 2, 11, 13, 17, 19, 23, 29, 1, 1)");
+        for (const goal of [G2.id, GP.id, ""]) insert.run(A, goal, "2024-02-29", rollModel);
+        insert.run(A, G1.id, "2024-03-01", rollModel);
+      });
+      const started = Date.now();
+      for (const u of users) {
+        const csv = await csvOf(u);
+        const records = parseCsv(csv.text);
+        const data = records.slice(5), total = data.at(-1);
+        const report = (await call(u.who, "GET", `/api/v2/workspaces/${A}/spend?by=team&from=2024-02-01T00:00:00.000Z&to=2024-03-01T00:00:00.000Z`, { cookie: u.cookie })).json;
+        const expected = [...report.rows.map((row) => [row.label, sums(row)]), ["Not bound to a goal", sums(report.unallocated)], ["Total", sums(report.total)]];
+        const matches = expected.every(([label, values]) => {
+          const row = data.find((r) => r[1] === label);
+          return row && nums(row).every((n, i) => n === values[i]);
+        });
+        check(`spend export: ${u.who} matches exactly the on-screen team report's rows and amounts`,
+          csv.status === 200 && JSON.stringify(records[4]) === JSON.stringify(columns) && data.length === expected.length && data.every((r) => r.length === columns.length && r[0] === "2024-02") && matches &&
+          total[1] === "Total" && nums(total).every((n, i) => n === data.slice(0, -1).reduce((sum, r) => sum + nums(r)[i], 0n)) &&
+          !csv.text.includes(CANARY) && !csv.text.includes(GP.id) && !users.some((p) => csv.text.includes(p.email) || csv.text.includes(p.name)) && !csv.text.includes(S3a), csv.text);
+        check(`spend export: ${u.who} receives an estimate disclaimer, UTC month, current generation time and private no-store attachment`,
+          records[0][1] === report.note && records[1].join() === "Month (UTC),2024-02" && records[2][0] === "Generated at (UTC)" &&
+          records[2][1].endsWith("Z") && Date.parse(records[2][1]) >= started && Date.parse(records[2][1]) <= Date.now() &&
+          csv.headers.get("content-type") === "text/csv; charset=utf-8" && csv.headers.get("content-disposition") === 'attachment; filename="align-spend-2024-02.csv"' &&
+          csv.headers.get("cache-control") === "private, no-store" && csv.headers.get("x-content-type-options") === "nosniff" && csv.text.endsWith("\r\n"), csv.text);
+      }
+      const ownerCsv = parseCsv((await csvOf(U1)).text).slice(5);
+      check("spend export: UTC start included, next month excluded, leap-day end included; raw and rolled-up unpriced requests count",
+        ownerCsv.at(-1)[2] === "12" && ownerCsv.at(-1)[4] === "4" && ownerCsv.find((r) => r[1] === "Not bound to a goal")[2] === "4", JSON.stringify(ownerCsv));
+      for (const name of ['=1+1,\n"quoted"', "+SUM(1,2)", "-1+2", "@SUM(A1:A2)", "\t=1+1", "\r=1+1", 'Finance, "East"\n東京']) {
+        withDb((d) => d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(name, P1));
+        const csv = await csvOf(U2);
+        const data = parseCsv(csv.text).slice(5);
+        const safeName = /^[=+\-@\t\r]/.test(name) ? `'${name}` : name;
+        const hiddenCsv = await csvOf(U4);
+        // U4 is a viewer in no team. Their CSV names exactly the teams their on-screen team report names, and no team's no-goal spend.
+        const hiddenRows = parseCsv(hiddenCsv.text).slice(5);
+        const hiddenReport = (await call(U4.who, "GET", `/api/v2/workspaces/${A}/spend?by=team&from=2024-02-01T00:00:00.000Z&to=2024-03-01T00:00:00.000Z`, { cookie: U4.cookie })).json;
+        check(`spend export: quotes and neutralizes ${JSON.stringify(name)}; a viewer receives the same goal-bound team name as the on-screen report`,
+          csv.status === 200 && data.some((r) => r[1] === safeName && r.length === columns.length) && !data.some((r) => /^[=+\-@\t\r]/.test(r[1])) &&
+          hiddenRows.every((r) => !/^[=+\-@\t\r]/.test(r[1])) && !hiddenRows.some((r) => /: spend in no goal$/.test(r[1])) &&
+          hiddenReport.rows.every((row) => hiddenRows.some((r) => r[1] === (/^[=+\-@\t\r]/.test(row.label) ? `'${row.label}` : row.label))) &&
+          hiddenRows.some((r) => r[1] === safeName) === hiddenReport.rows.some((row) => row.label === name), `${csv.text}\n${hiddenCsv.text}`);
+      }
+      withDb((d) => d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(original.team, P1));
+      for (const month of ["2024-12", "2025-01", "0099-02", "9999-12"]) {
+        const csv = await csvOf(U4, `month=${month}`);
+        const data = parseCsv(csv.text).slice(5);
+        check(`spend export: empty ${month} has only the table's zero unallocated and total rows`,
+          csv.status === 200 && data.map((r) => r[1]).join("|") === "Not bound to a goal|Total" && data.every((r) => r[0] === month && nums(r).every((n) => n === 0n)), csv.text);
+      }
+      const invalid = ["", "month=", "month=2024-2", "month=2024-00", "month=2024-13", "month=0000-01", "month=2024-02-01", "month=2024-02T00:00:00Z", "month=2024-02&month=2024-03", "month=%3D1%2B1", "month=2024-02%0D%0AX-Test:yes"];
+      const invalidResults = await Promise.all(invalid.map((q) => csvOf(U4, q)));
+      check("spend export: missing, repeated, malformed and header-injection months return 400 JSON, never CSV",
+        invalidResults.every((r) => r.status === 400 && r.json?.error === "bad_request" && !r.headers.get("content-disposition")), invalidResults.map((r) => r.status).join());
+      const authResults = await Promise.all([
+        call("anon", "GET", `/api/v2/workspaces/${A}/spend/export`),
+        csvOf(U1, "month=invalid", B),
+        call("U1", "GET", `/api/v2/workspaces/${A}/spend/export?month=2024-02`, { bearer: D1.access, cookie: U1.cookie }),
+      ]);
+      check("spend export: report authorization precedes month validation: anonymous 401, non-member 404, device token 403",
+        authResults.map((r) => r.status).join() === "401,404,403" && authResults.every((r) => !r.headers.get("content-disposition")), authResults.map((r) => `${r.status} ${r.text}`).join(" | "));
+
+      if (existsSync(CHROME)) {
+        const { default: puppeteer } = await import("puppeteer-core");
+        const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+        const downloads = mkdtempSync(path.join(os.tmpdir(), "align-spend-export-"));
+        try {
+          const page = await browser.newPage(), errors = [];
+          page.on("pageerror", (e) => errors.push(String(e)));
+          await page.setCookie(...U4.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          const cdp = await page.createCDPSession();
+          await cdp.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+          await page.setViewport({ width: 1280, height: 900 });
+          await page.goto(`${BASE}/app/w/${A}/spend`, { waitUntil: "networkidle0" });
+          await page.waitForSelector('input[aria-label="Export month (UTC)"]');
+          const current = await page.$eval('[data-spend-export] input[type="month"]', (e) => e.value);
+          await page.screenshot({ path: path.join(ROOT, ".next/spend-export-desktop.png"), fullPage: true });
+          await page.setViewport({ width: 390, height: 844 });
+          await page.select('select[aria-label="Group by"]', "session");
+          await page.$eval('[data-spend-export] input[type="month"]', (e) => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(e, "2024-02");
+            e.dispatchEvent(new Event("input", { bubbles: true }));
+          });
+          const exportButton = () => page.$eval("[data-spend-export] button", (b) => b.click());
+          const request = page.waitForRequest((r) => r.url().includes("/spend/export?month=2024-02"));
+          await exportButton();
+          await request;
+          const file = path.join(downloads, "align-spend-2024-02.csv");
+          for (let i = 0; i < 100 && !existsSync(file); i++) await sleep(50);
+          const saved = existsSync(file) ? parseCsv(readFileSync(file, "utf8")).slice(5) : [];
+          const expected = parseCsv((await csvOf(U4)).text).slice(5);
+          const fit = await page.evaluate(() => ({
+            sw: document.scrollingElement.scrollWidth, width: innerWidth,
+            controls: [...document.querySelectorAll('[data-spend-export] input, [data-spend-export] button')].filter((e) => e.matches('[data-spend-export] input[type="month"]') || e.textContent === "Download team CSV").map((e) => {
+              const r = e.getBoundingClientRect(); return { h: r.height, left: r.left, right: r.right };
+            }),
+          }));
+          await page.screenshot({ path: path.join(ROOT, ".next/spend-export-390.png"), fullPage: true });
+          check("spend export (Chrome): viewer downloads the selected UTC month by team while viewing sessions; current UTC month is the default; controls fit 390 px and are at least 44 px tall",
+            current === new Date().toISOString().slice(0, 7) && JSON.stringify(saved) === JSON.stringify(expected) && saved.length > 0 && fit.sw <= fit.width && fit.controls.length === 2 &&
+            fit.controls.every((r) => r.h >= 44 && r.left >= 0 && r.right <= 390) && errors.length === 0, `${JSON.stringify(fit)} ${errors.join(" | ")}`);
+          await page.deleteCookie(...(await page.cookies()));
+          await exportButton();
+          await page.waitForFunction(() => [...document.querySelectorAll('[role="alert"]')].some((e) => /Could not download/.test(e.textContent)), { timeout: 10000 });
+          check("spend export (Chrome): an expired sign-in leaves a visible download error on the Spend page",
+            (await page.$eval('[role="alert"]', (e) => e.textContent)).includes("Sign in first") && errors.length === 0, errors.join(" | "));
+        } finally { await browser.close(); rmSync(downloads, { recursive: true, force: true }); }
+      } else check("spend export (Chrome): browser download and 390 px layout", false, `Chrome not found: ${CHROME}`);
+    } finally {
+      withDb((d) => {
+        for (const row of original.usage) d.prepare("UPDATE v2_usage SET ts = ? WHERE ws_id = ? AND request_key = ?").run(row.ts, A, row.request_key);
+        d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(original.team, P1);
+        d.prepare("DELETE FROM v2_spend_rollups WHERE ws_id = ? AND model = ?").run(A, rollModel);
+      });
+    }
+  }
+  // ---- END SPEND EXPORT ----
 
   // -- directives --
   const dirs = async (dev, cursor = 0) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
@@ -8120,6 +8448,66 @@ try {
         // PR 68 item 13 (founder review of e780d842): Drop this goal → Confirm drops it (next version, status dropped) and the
         // confirmation goes away at once, with no second Confirm on the replaced version and no reload needed.
         const GD = (await ha(HO, "POST", "/goals", { title: "Hana's goal to drop", visibility: "workspace", measures: [{ text: "Kept on drop", target: "1" }] })).json;
+        // LIM-2513 journey pass: the goal page leads with what the goal is. Under the title the owner's one action is Edit
+        // this goal (it moves to the New version form and focuses its first field); with no shared session on the goal
+        // the hold controls are folded; Drop this goal sits at the foot of the New version form, after Save.
+        {
+          const pg = await browser.newPage();
+          await pg.setViewport({ width: 1440, height: 900 });
+          await pg.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await pg.goto(`${BASE}/app/w/${HW}/goals/${GD?.id}`, { waitUntil: "networkidle0" });
+          await pg.waitForSelector("#new-version", { timeout: 15000 });
+          const lay = await pg.evaluate(() => {
+            const h1 = document.querySelector("main h1");
+            const measures = [...document.querySelectorAll("main h2, main h3")].find((h) => h.textContent?.trim() === "Measures");
+            const before = (el) => !!el && !!measures && !!(el.compareDocumentPosition(measures) & Node.DOCUMENT_POSITION_FOLLOWING);
+            const buttons = [...document.querySelectorAll("main button")];
+            const edit = buttons.find((b) => b.textContent?.trim() === "Edit this goal");
+            const drop = buttons.find((b) => b.textContent?.trim() === "Drop this goal");
+            const save = buttons.find((b) => /^Save version \d+$/.test(b.textContent?.trim() ?? ""));
+            const aboveMeasures = buttons.filter((b) => before(b) && !!h1 && !!(h1.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)).map((b) => b.textContent?.trim());
+            const folded = document.querySelector("#agents-on-goal [data-hold-folded]");
+            return {
+              aboveMeasures,
+              dropInForm: !!drop && !!drop.closest("#new-version") && !!save && !!(save.compareDocumentPosition(drop) & Node.DOCUMENT_POSITION_FOLLOWING),
+              folded: !!folded && !folded.hasAttribute("open") && /Hold agents on this goal/.test(folded.querySelector("summary")?.textContent ?? ""),
+              editFirst: !!edit,
+            };
+          });
+          await pg.evaluate(() => [...document.querySelectorAll("main button")].find((b) => b.textContent?.trim() === "Edit this goal")?.click());
+          await sleep(600);
+          const focusIn = await pg.evaluate(() => !!document.activeElement?.closest("#new-version") && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? ""));
+          await pg.close();
+          check(
+            "ui (Chrome, LIM-2513): the owner's goal page leads with the goal: under the title the only action is Edit this goal, which focuses the New version form; with no shared session the hold controls are folded under \"Hold agents on this goal\"; Drop this goal is in the New version form after Save",
+            lay.editFirst && JSON.stringify(lay.aboveMeasures) === '["Edit this goal"]' && lay.folded && lay.dropInForm && focusIn,
+            JSON.stringify({ ...lay, focusIn }),
+          );
+        }
+        // LIM-2513 journey pass: a person who owns every active goal gets, in the Propose a change drawer, each goal linked
+        // to its New version form instead of a dead end; following one lands on the form with its first field focused.
+        {
+          const wsO = await call(HO.who, "POST", "/api/v2/workspaces", { cookie: HO.cookie, body: { name: "Hana solo" } });
+          const gO = await call(HO.who, "POST", `/api/v2/workspaces/${wsO.json?.id}/goals`, { cookie: HO.cookie, body: { title: "Hana's only goal", visibility: "workspace" } });
+          const po = await browser.newPage();
+          await po.setViewport({ width: 390, height: 844 });
+          await po.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await po.goto(`${BASE}/app/w/${wsO.json?.id}`, { waitUntil: "networkidle0" });
+          await po.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+          await po.waitForSelector(`[data-propose-edit="${gO.json?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+          const drawerO = await po.evaluate(() => document.querySelector('[data-propose="none"]')?.innerText ?? "");
+          await po.evaluate((id) => document.querySelector(`[data-propose-edit="${id}"]`)?.click(), gO.json?.id);
+          await po.waitForSelector("#new-version", { timeout: 15000 }).catch(() => undefined);
+          await sleep(800);
+          const landed = await po.evaluate(() => ({ path: location.pathname + location.hash, focus: !!document.activeElement?.closest("#new-version") }));
+          await po.close();
+          check(
+            "ui (Chrome, 390, LIM-2513): owning every active goal, the Propose a change drawer names each goal with \"Edit v1\", linked to its New version form; following it lands on that form with its first field focused",
+            wsO.status === 201 && gO.status === 201 && /You own every active goal you can see here, so you change one directly/.test(drawerO) && /Hana's only goal/.test(drawerO) && /Edit v1/.test(drawerO) &&
+              landed.path === `/app/w/${wsO.json?.id}/goals/${gO.json?.id}#new-version` && landed.focus,
+            JSON.stringify({ ws: wsO.status, goal: gO.status, drawerO, landed }),
+          );
+        }
         const pd = await browser.newPage();
         await pd.setViewport({ width: 390, height: 844 });
         await pd.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
@@ -8714,6 +9102,375 @@ try {
     }
   }
   // ==== end live:stream ====
+
+  // ======== team budgets: server acceptance (stages B and C) ========
+  {
+    const people = {};
+    for (const [who, name] of [["SO", "Spend Owner"], ["SO2", "Second Owner"], ["SL", "Spend Lead"], ["SL2", "Other Lead"], ["SM", "Spend Member"], ["SV", "Spend Viewer"], ["SX", "Other Team Member"]])
+      people[who] = await signUp(who, name, `${who.toLowerCase()}@spend.example.test`);
+    const { SO, SO2, SL, SL2, SM, SV, SX } = people;
+    const W = (await call(SO.who, "POST", "/api/v2/workspaces", { cookie: SO.cookie, body: { name: "Spending workspace" } })).json.id;
+    const req = (u, method, p, body, headers) => call(u.who, method, `/api/v2/workspaces/${W}${p}`, { cookie: u.cookie, ...(body === undefined ? {} : { body }), ...(headers ? { headers } : {}) });
+    for (const [u, role] of [[SO2, "owner"], [SL, "member"], [SL2, "member"], [SM, "member"], [SV, "viewer"], [SX, "member"]]) {
+      const i = await req(SO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const T = (await req(SO, "POST", "/teams", { name: "Build" })).json.id;
+    const T2 = (await req(SO, "POST", "/teams", { name: "Other" })).json.id;
+    for (const [u, role] of [[SL, "lead"], [SL2, "lead"], [SM, "member"], [SV, "member"]]) await req(SO, "POST", `/teams/${T}/members`, { user_id: u.id, role });
+    const env = `/teams/${T}/budget`;
+    const asks = `/teams/${T}/budget-requests`;
+    const m = new Date().toISOString().slice(0, 7);
+    const monthEnd = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 1)).toISOString();
+    const request = (u, body = {}) => req(u, "POST", asks, { amount_usd: 20, reason: "Finish the current task", ...body });
+    const act = (u, r, action, body = {}) => req(u, "POST", `/budget-requests/${r.id}/${action}`, { revision: r.revision, ...body });
+    const read = (u, r) => req(u, "GET", `/budget-requests/${r.id}`);
+    const auditCount = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ? AND (action LIKE 'team_budget.%' OR action LIKE 'budget_request.%')").get(W).n);
+    const empty = await req(SM, "GET", env);
+    const noEnv = await request(SM);
+    check("team budgets: no budget is an honest null with zero known usage and no change to work; asking without one is 409", empty.json.budget === null && empty.json.estimated_spend_usd_micros === 0 && empty.json.effective_budget_usd_micros === null && noEnv.status === 409 && noEnv.json.error === "budget_missing", noEnv.text);
+    const set = await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5 });
+    const setHistory = set.json.history;
+    check("team budgets: a lead sets one monthly budget and allowance with recorded actor, time and audit", set.status === 200 && set.json.budget.amount_usd_micros === 100_000_000 && set.json.budget.allowance_usd_micros === 5_000_000 && setHistory.length === 1 && setHistory[0].actor.id === SL.id && setHistory[0].action === "set" && auditCount() === 1, set.text);
+    const badSets = await Promise.all([-1, 0.001, "100", 1_000_001].map((amount_usd) => req(SO, "PUT", env, { amount_usd })));
+    const badMonth = await req(SO, "GET", `${env}?month=2026-13`);
+    const past = await req(SO, "PUT", `${env}?month=2000-01`, { amount_usd: 1 });
+    const foreign = await call(SO.who, "PUT", `/api/v2/workspaces/${A}/teams/${T}/budget`, { cookie: SO.cookie, body: { amount_usd: 1 } });
+    const rejected = await Promise.all([req(SM, "PUT", env, { amount_usd: 1 }), req(SV, "DELETE", env), req(SL, "PUT", `/teams/${T2}/budget`, { amount_usd: 1 }), req(U1, "GET", env), req(SO, "PUT", env, { amount_usd: 1 }, { origin: "http://evil.example" })]);
+    check("team budgets: bad money/month, past writes, member/viewer/other-team writes, cross-workspace and cross-site requests fail without writes", badSets.every((r) => r.status === 400) && badMonth.status === 400 && past.status === 409 && foreign.status === 404 && rejected.map((r) => r.status).join() === "403,403,403,404,403" && rejected[1].json.error === "read_only" && auditCount() === 1, JSON.stringify([badSets.map((r) => r.status), rejected.map((r) => [r.status, r.json?.error])]));
+
+    const privateTitle = `SPEND-PRIVATE-${randomBytes(6).toString("hex")}`;
+    const goal = (await req(SM, "POST", "/goals", { title: "Finish build", team_id: T, visibility: "workspace" })).json;
+    const hidden = (await req(SM, "POST", "/goals", { title: privateTitle, team_id: T, visibility: "private" })).json;
+    const keys = newDeviceKeys();
+    const dev = insertDevice(SM.id, "Spend device");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(dev.id, W));
+    const D = { ...keys, who: SM.who, user: SM, id: dev.id, access: dev.access };
+    const device = (method, p, body) => call(SM.who, method, `/api/v2/workspaces/${W}${p}`, { bearer: D.access, ...(body === undefined ? {} : { body }) });
+    const started = new Date(Date.now() - 60_000).toISOString();
+    const share = async (native, g, price) => {
+      const key = sessionKey(D, W, "claude-code", native), ep = epochId();
+      const s = await device("PUT", `/sessions/${key}`, { harness: "claude-code", repo_key: repoKey(D, W, `/src/${native}`), started_at: started, title: null });
+      const e = await device("POST", `/sessions/${key}/epochs`, { epoch_id: ep, goal_id: g, starts_at: started, cause: "manual", root_turn: null });
+      const u = await device("POST", `/sessions/${key}/usage`, { rows: [usageRow(D, native, ep, { ts: started, est_list_usd_micros: price })] });
+      check(`team budgets setup: ${native} shared, bound and metered`, s.status === 200 && e.status === 200 && u.json?.accepted === 1, `${s.status} ${e.text} ${u.text}`);
+      return { key, ep };
+    };
+    const own = await share("spend-visible", goal.id, 20_000_000);
+    await share("spend-hidden", hidden.id, 10_000_000);
+    const unbound = await share("spend-no-goal", null, 10_000_000);
+    const outsiderBudget = await req(SO2, "GET", env);
+    check("budgets: workspace owners read another team budget", outsiderBudget.status === 200);
+    const burns = await Promise.all([SO, SM, SV].map((u) => req(u, "GET", env)));
+    check("team budgets: team burn includes readable, private and no-goal work, with no named goal/session/person spend; viewer sees the same totals", burns.every((r) => r.status === 200 && r.json.estimated_spend_usd_micros === 40_000_000 && r.json.remaining_usd_micros === 60_000_000 && r.json.no_goal.share_percent === 25 && r.json.forecast_usd_micros >= 40_000_000 && !r.text.includes(hidden.id) && !r.text.includes(privateTitle) && !r.text.includes(own.key)), burns[0].text);
+    const privateBudget = await req(SX, "GET", env), privateCsv = await req(SX, "GET", `/spend/export?month=${m}`);
+    check("budgets and spend export: readable goal-bound team spend matches the on-screen report while home-team spend stays unallocated", privateBudget.status === 404 && privateCsv.text.includes('"Build","1","20.000000"') && privateCsv.text.includes('"Private goals","1","10.000000"') && privateCsv.text.includes('"Not bound to a goal","1","10.000000"') && !privateCsv.text.includes("Build: spend in no goal") && !privateCsv.text.includes("Private teams"), privateCsv.text);
+    await req(SO, "DELETE", `/teams/${T}/members/${SM.id}`);
+    const afterLeave = await req(SO, "GET", env);
+    await req(SO, "POST", `/teams/${T}/members`, { user_id: SM.id, role: "member" });
+    check("team budgets: no-goal attribution survives a later membership change", afterLeave.json.no_goal.priced_spend_usd_micros === 10_000_000 && afterLeave.json.estimated_spend_usd_micros === 40_000_000, afterLeave.text);
+    await req(SO, "POST", `/teams/${T2}/members`, { user_id: SM.id, role: "member" });
+    const defaultHome = await device("GET", "/spend/home-team");
+    const chosenHome = await req(SM, "PUT", "/spend/home-team", { team_id: T2 });
+    const notMyTeam = await req(SO, "PUT", "/spend/home-team", { team_id: T });
+    const bearerChoice = await device("PUT", "/spend/home-team", { team_id: T });
+    const unchangedBurn = await req(SO, "GET", env);
+    const terminalTeams = await device("GET", "/spend/teams");
+    const ownerTeams = await req(SO, "GET", "/spend/teams");
+    check("budget choices: device members get named member teams and workspace owners get every team", terminalTeams.status === 200 && terminalTeams.json.teams.some((t) => t.id === T && t.name === "Build") && terminalTeams.json.teams.some((t) => t.id === T2) && terminalTeams.json.teams.length === 2 && ownerTeams.status === 200 && ownerTeams.json.teams.some((t) => t.id === T2), terminalTeams.text);
+    const capturedBudget = await device("GET", `/sessions/${unbound.key}/budget`);
+    const otherSessionReader = await req(SL, "GET", `/sessions/${unbound.key}/budget`);
+    check("session budget: only its person/sharing device reads the captured team, and a later home choice does not move it",
+      capturedBudget.status === 200 && capturedBudget.json.team.id === T && capturedBudget.json.epoch_id === unbound.ep && otherSessionReader.status === 404,
+      `${capturedBudget.text} ${otherSessionReader.status}`);
+
+    check("spend home: earliest membership defaults, only the person chooses their own teams, devices read but cannot write, past epochs stay put",
+      defaultHome.json.team.id === T && defaultHome.json.can_choose && chosenHome.json.team.id === T2 && notMyTeam.status === 404 && bearerChoice.status === 403 && unchangedBurn.json.estimated_spend_usd_micros === 40_000_000,
+      `${defaultHome.text} ${chosenHome.text} ${notMyTeam.status} ${bearerChoice.status}`);
+    await req(SO, "DELETE", `/teams/${T2}/members/${SM.id}`);
+    check("spend home: leaving the chosen team clears the preference", (await req(SM, "GET", "/spend/home-team")).json.team.id === T);
+    const devRead = await device("GET", env);
+    const devWrite = await device("PUT", env, { amount_usd: 999 });
+    check("team budgets: granted devices read burn but cannot set a budget", devRead.status === 200 && devWrite.status === 403 && devWrite.json.error === "bearer_not_allowed", devWrite.text);
+
+    const low = await request(SM, { amount_usd: 5, goal_id: hidden.id, session_keys: [own.key] });
+    const waiting = await request(SM, { goal_id: hidden.id, session_keys: [own.key] });
+    const mine = await read(SM, waiting.json), ownerView = await read(SO, waiting.json);
+    check("team budgets: allowance grant has no approver and exact authority label; larger request waits; private goal and attached sessions are redacted for the owner", low.status === 201 && low.json.state === "granted" && low.json.authority === "allowance" && low.json.authority_label === "This request was recorded under the team's allowance." && low.json.decisions.length === 0 && low.json.expires_at === monthEnd && waiting.status === 201 && waiting.json.state === "waiting" && mine.json.goal.id === hidden.id && mine.json.session_keys[0] === own.key && ownerView.json.goal === null && ownerView.json.goal_hidden && ownerView.json.session_count === 1 && ownerView.json.session_keys.length === 0 && !ownerView.text.includes(hidden.id) && !ownerView.text.includes(own.key), ownerView.text);
+    const badRequests = await Promise.all([request(SV), request(SO), request(SM, { amount_usd: 0 }), request(SM, { reason: " " }), request(SL, { goal_id: hidden.id }), request(SL, { session_keys: [own.key] }), request(SM, { session_keys: [own.key, own.key] }), request(SM, { reason: "x".repeat(17_000) })]);
+    check("team budgets: viewer/non-team requester, zero amount, blank reason, unreadable goal, another person's sessions, duplicate sessions and oversized body fail", badRequests.map((r) => r.status).join() === "403,403,400,400,404,404,400,413", JSON.stringify(badRequests.map((r) => [r.status, r.json?.error])));
+    const exhausted = await request(SM, { amount_usd: 1 });
+    const exhaustedBurn = (await req(SO, "GET", env)).json;
+    check("team budgets: omitted ceiling defaults to allowance and a second grant waits after exhaustion", exhausted.json.state === "waiting" && exhaustedBurn.budget.allowance_ceiling_usd_micros === 5_000_000 && exhaustedBurn.allowance_remaining_usd_micros === 0, exhausted.text);
+    const raisedCeiling = await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 6 });
+    check("team budgets: a lead changes the ceiling, preserving grants and recording its history", raisedCeiling.json.allowance_granted_usd_micros === 5_000_000 && raisedCeiling.json.allowance_remaining_usd_micros === 1_000_000 && raisedCeiling.json.history.at(-1).allowance_ceiling_usd_micros === 6_000_000, raisedCeiling.text);
+    const deviceAsk = await device("POST", asks, { amount_usd: 1, reason: "Terminal request" });
+    check("budgets: terminal requests always wait for a person under the allowance", deviceAsk.status === 201 && deviceAsk.json.authority === null && deviceAsk.json.state === "waiting" && deviceAsk.json.filed_from === "terminal", deviceAsk.text);
+    check("budgets: authenticated filing source is shown on records, lists and Home", /Filed from a terminal on the device .+\. Align cannot tell whether .+ or an agent on that device ran the command\./.test(deviceAsk.json.filing_note) && /^Filed in the browser by .+\.$/.test(low.json.filing_note) && (await req(SM, "GET", "/budget-requests")).json.mine.some((r) => r.id === deviceAsk.json.id && r.filing_note === deviceAsk.json.filing_note) && (await req(SM, "GET", "/home")).json.budget_requests.mine.some((r) => r.id === deviceAsk.json.id && r.filing_note === deviceAsk.json.filing_note), deviceAsk.text);
+    const first = waiting.json;
+    const beforeDecisions = auditCount();
+    const missingRevision = await req(SL, "POST", `/budget-requests/${first.id}/approve`, { amount_usd: 1, expires_at: monthEnd });
+    const invalidDecisions = await Promise.all([act(SM, first, "approve", { amount_usd: 20, expires_at: monthEnd }), act(SV, first, "decline", { reason: "No" }), act(SL, first, "approve", { amount_usd: 21, expires_at: monthEnd }), act(SL, first, "approve", { amount_usd: 1, expires_at: "2000-01-01T00:00:00Z" }), act(SL, first, "approve", { amount_usd: 1, expires_at: "2099-01-01T00:00:00Z" }), act(SL, first, "decline", { reason: " " }), act(SL, first, "decline", { revision: 99, reason: "x".repeat(1001) })]);
+    check("team budgets: self-decision, viewer, amount above ask, expired/next-month expiry, blank decline and missing/future revisions are refused atomically", missingRevision.status === 400 && invalidDecisions.map((r) => r.status).join() === "403,403,400,400,400,400,400" && invalidDecisions[6].json.error === "unknown_revision" && auditCount() === beforeDecisions, JSON.stringify(invalidDecisions.map((r) => [r.status, r.json?.error])));
+    const decline = await act(SO, first, "decline", { reason: "Keep the scope smaller" });
+    const referral = await act(SM, decline.json, "second-look");
+    const repeatedReferral = await act(SM, referral.json, "second-look");
+    const sameOwner = await act(SO, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd });
+    const leadSecond = await act(SL, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd });
+    const staleFirst = await act(SO2, first, "approve", { amount_usd: 12, expires_at: monthEnd });
+    const grant = await act(SO2, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd, note: "Finish this part" });
+    check("team budgets: one second look, different owner only, stale first decision refused, partial approval preserves both decisions", decline.json.state === "declined" && referral.json.state === "waiting" && referral.json.second_look && repeatedReferral.status === 409 && sameOwner.status === 403 && leadSecond.status === 403 && staleFirst.status === 409 && staleFirst.json.error === "stale_revision" && grant.status === 200 && grant.json.state === "granted" && grant.json.approved_usd_micros === 12_000_000 && grant.json.decisions.map((d) => d.decision).join() === "declined,granted" && grant.json.decisions[0].actor.id === SO.id && grant.json.decisions[1].actor.id === SO2.id, grant.text);
+    const burnGranted = (await req(SO, "GET", env)).json;
+    check("team budgets: active allowance and approved grants raise the monthly effective budget and remaining estimate", burnGranted.effective_budget_usd_micros === 117_000_000 && burnGranted.remaining_usd_micros === 77_000_000, JSON.stringify(burnGranted));
+    const twice = (await request(SM)).json;
+    const d1 = await act(SL, twice, "decline", { reason: "No" });
+    const s2 = await act(SM, d1.json, "second-look");
+    const d2 = await act(SO, s2.json, "decline", { reason: "Still no" });
+    const s3 = await act(SM, d2.json, "second-look");
+    check("team budgets: two declines remain in the record and a second referral is refused", d2.json.decisions.length === 2 && s3.status === 409 && !d2.json.can.second_look, s3.text);
+    const withdrawMe = (await request(SL)).json;
+    const selfLead = await act(SL, withdrawMe, "approve", { amount_usd: 1, expires_at: monthEnd });
+    const wrongWithdraw = await act(SO, withdrawMe, "withdraw");
+    const withdrew = await act(SL, withdrawMe, "withdraw");
+    const afterWithdraw = await act(SO, withdrawMe, "approve", { amount_usd: 1, expires_at: monthEnd });
+    check("team budgets: a requesting lead cannot approve themselves; only requester withdraws; a decision after withdrawal fails", selfLead.status === 403 && wrongWithdraw.status === 403 && withdrew.json.state === "withdrawn" && afterWithdraw.status === 409, `${selfLead.status} ${wrongWithdraw.status} ${withdrew.text}`);
+    const racing = (await request(SM)).json;
+    const raced = await Promise.all([act(SL, racing, "approve", { amount_usd: 2, expires_at: monthEnd }), act(SL2, racing, "decline", { reason: "No" })]);
+    const raceRecord = (await read(SM, racing)).json;
+    check("team budgets: racing decisions produce one transition and one immutable decision", raced.map((r) => r.status).sort().join() === "200,409" && raceRecord.decisions.length === 1, JSON.stringify(raced.map((r) => [r.status, r.json?.error])));
+    const privateRead = await read(U1, first);
+    const waitingHome = (await request(SM)).json;
+    const ownerHome = await req(SO, "GET", "/home"), requesterHome = await req(SM, "GET", "/home");
+    const listing = (await req(SL, "GET", "/budget-requests")).json;
+    check("team budgets: eligible deciders see waiting requests on Home, requester sees every own state, outsiders cannot read, and lists do not leak private goals", ownerHome.json.budget_requests.waiting_on_me.some((r) => r.id === waitingHome.id) && requesterHome.json.budget_requests.mine.some((r) => r.id === first.id && r.state === "granted") && listing.waiting_on_me.some((r) => r.id === waitingHome.id) && privateRead.status === 404 && !ownerHome.text.includes(hidden.id) && !ownerHome.text.includes(privateTitle), ownerHome.text.slice(-1000));
+    // Home excludes irrelevant history before loading records, while the full list retains it.
+    const oldHome = (await request(SM)).json;
+    withDb((d) => d.prepare("UPDATE v2_budget_requests SET month = '2000-01' WHERE id = ?").run(oldHome.id));
+    const previousHome = (await request(SM)).json;
+    const previousMonth = new Date(`${m}-01T00:00:00.000Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth() - 1);
+    const olderMonth = new Date(previousMonth); olderMonth.setUTCMonth(olderMonth.getUTCMonth() - 1);
+    withDb((d) => {
+      d.prepare("UPDATE v2_budget_requests SET month = ? WHERE id = ?").run(olderMonth.toISOString().slice(0, 7), oldHome.id);
+      d.prepare("UPDATE v2_budget_requests SET month = ? WHERE id = ?").run(previousMonth.toISOString().slice(0, 7), previousHome.id);
+    });
+    const boundedHome = (await req(SM, "GET", "/home")).json.budget_requests;
+    const fullHistory = (await req(SM, "GET", `/budget-requests?month=${olderMonth.toISOString().slice(0, 7)}`)).json;
+    check("spend Home: own previous month is retained, older requests remain only in full lists, other people's terminal history is excluded",
+      boundedHome.mine.some((r) => r.id === previousHome.id && r.state === "expired") && !boundedHome.mine.some((r) => r.id === oldHome.id) && fullHistory.mine.some((r) => r.id === oldHome.id) &&
+      !ownerHome.json.budget_requests.mine.some((r) => r.requester.id !== SO.id) && !ownerHome.json.budget_requests.waiting_on_me.some((r) => r.state !== "waiting"), JSON.stringify(boundedHome));
+    const solo = (await req(SO, "POST", "/teams", { name: "Solo" })).json.id;
+    await req(SO, "POST", `/teams/${solo}/members`, { user_id: SO.id, role: "lead" });
+    await req(SO, "POST", `/teams/${solo}/members`, { user_id: SM.id, role: "member" });
+    await req(SO, "PUT", `/teams/${solo}/budget`, { amount_usd: 100 });
+    withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(W, SO2.id));
+    try {
+      const stranded = await req(SO, "POST", `/teams/${solo}/budget-requests`, { amount_usd: 20, reason: "Finish work" });
+      const self = await act(SO, stranded.json, "approve", { amount_usd: 20, expires_at: monthEnd });
+      const strandedList = (await req(SO, "GET", `/teams/${solo}/budget-requests`)).json;
+      check("budget requests: sole lead and sole owner creates successfully, record and list explain no eligible decider, self-approval stays forbidden",
+        stranded.status === 201 && stranded.json.state === "waiting" && stranded.json.approvers.length === 0 && stranded.json.decision_unavailable_reason.includes("Nobody is eligible") &&
+        strandedList.mine.some((r) => r.id === stranded.json.id && r.decision_unavailable_reason) && self.status === 403, stranded.text);
+      const pendingSecond = await req(SM, "POST", `/teams/${solo}/budget-requests`, { amount_usd: 20, reason: "Finish work" });
+      const no = await act(SO, pendingSecond.json, "decline", { reason: "Scope" });
+      const before = auditCount();
+      const noSecond = await act(SM, no.json, "second-look");
+      const after = await read(SM, no.json);
+      check("budget requests: no eligible different owner means no second look is offered, a reason is shown and a referral records nothing",
+        !after.json.can.second_look && after.json.second_look_unavailable_reason.includes("No other workspace owner") && noSecond.status === 409 && noSecond.json.error === "no_eligible_approver" && after.json.revision === no.json.revision && auditCount() === before, noSecond.text);
+    } finally {
+      withDb((d) => d.prepare("UPDATE v2_members SET role = 'owner' WHERE ws_id = ? AND user_id = ?").run(W, SO2.id));
+    }
+    const beforeRead = auditCount();
+    await req(SO, "GET", env); await req(SO, "GET", "/budget-requests");
+    check("team budgets: reading and derived expiry write no audit or decisions", auditCount() === beforeRead);
+    withDb((d) => d.prepare("UPDATE v2_budget_requests SET expires_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", grant.json.id));
+    const expired = await read(SM, grant.json), afterExpiry = await req(SO, "GET", env);
+    check("team budgets: expired grant is distinct and contributes nothing; decision history survives", expired.json.state === "expired" && expired.json.authority === "approver" && expired.json.decisions.length === 2 && afterExpiry.json.effective_budget_usd_micros === burnGranted.effective_budget_usd_micros - 12_000_000 + (raceRecord.state === "granted" ? 2_000_000 : 0), afterExpiry.text);
+    const unknown = await device("POST", `/sessions/${unbound.key}/usage`, { rows: [usageRow(D, "spend-unknown", unbound.ep, { ts: started, est_list_usd_micros: null })] });
+    const withUnknown = await req(SV, "GET", env);
+    check("team budgets: unpriced work is counted with explicit spend/forecast lower bounds and remaining upper bound; share and crossing stay absent", unknown.json.accepted === 1 && withUnknown.json.unpriced_requests === 1 && withUnknown.json.priced_spend_usd_micros === 40_000_000 && withUnknown.json.estimated_spend_usd_micros === 40_000_000 && withUnknown.json.spend_bound === "lower" && withUnknown.json.remaining_bound === "upper" && withUnknown.json.remaining_usd_micros === afterExpiry.json.effective_budget_usd_micros - 40_000_000 && withUnknown.json.forecast_bound === "lower" && withUnknown.json.forecast_usd_micros >= 40_000_000 && withUnknown.json.runs_out_at === null && withUnknown.json.no_goal.share_percent === null && withUnknown.json.no_goal.estimated_spend_usd_micros === 10_000_000 && withUnknown.json.no_goal.spend_bound === "lower" && withUnknown.json.pricing_note.includes("1 unpriced request"), withUnknown.text);
+    const homeBeforeCrossing = (await req(SO, "GET", "/home")).json;
+    const crossedBudget = await req(SL, "PUT", env, { amount_usd: 0.01 });
+    const stamps = await call(SM.who, "GET", "/api/v2/directives?cursor=0", { bearer: D.access });
+    const attrStamped = await device("GET", `/sessions/${own.key}/budget?attribution=1`);
+    check("budget timing: directive, attribution and team reads return the same private change stamp", stamps.status === 200 && stamps.json.budget_stamps.some((v) => v.ws === W && v.team === T && v.stamp === crossedBudget.json.budget_stamp) && stamps.json.budget_stamps.every((v) => Object.keys(v).sort().join() === "month,stamp,team,ws") && attrStamped.json.budget_stamp === crossedBudget.json.budget_stamp, stamps.text);
+    await req(SO, "PUT", `/teams/${T2}/budget`, { amount_usd: 100 });
+    const privateStamps = await call(SM.who, "GET", "/api/v2/directives?cursor=0", { bearer: D.access });
+    check("budget timing: a member's directive response omits another team's stamp", !privateStamps.json.budget_stamps.some((v) => v.ws === W && v.team === T2), privateStamps.text);
+    await req(SO, "DELETE", `/teams/${T2}/budget`);
+    const homeCrossed = (await req(SO, "GET", "/home")).json;
+    const leadCrossed = (await req(SL, "GET", "/home")).json;
+    const memberCrossed = (await req(SM, "GET", "/home")).json;
+    const otherCrossed = (await req(SX, "GET", "/home")).json;
+    const crossingRows = homeCrossed.budget_crossings.filter((v) => v.team.id === T);
+    check("budget timing: Home crossings are first observations for leads and owners, with no change to Needs data", crossedBudget.json.reached_thresholds.join() === "80,100" && crossingRows.length === 2 && crossingRows.every((v) => v.as_of && v.observed_at) && leadCrossed.budget_crossings.filter((v) => v.team.id === T).length === 2 && memberCrossed.budget_crossings.length === 0 && !otherCrossed.budget_crossings.some((v) => v.team.id === T) && JSON.stringify(homeBeforeCrossing.budget_requests) === JSON.stringify(homeCrossed.budget_requests), JSON.stringify(crossingRows));
+    const homeRepeated = (await req(SO, "GET", "/home")).json;
+    check("budget timing: repeated reads preserve the first crossing and disclose no private goal or session", JSON.stringify(homeRepeated.budget_crossings) === JSON.stringify(homeCrossed.budget_crossings) && !JSON.stringify(crossingRows).includes(hidden.id) && !JSON.stringify(crossingRows).includes(own.key), JSON.stringify(homeRepeated.budget_crossings));
+    const changed = await req(SO, "PUT", env, { amount_usd: 120 });
+    const removed = await req(SL, "DELETE", env);
+    const removedAgain = await req(SL, "DELETE", env);
+    check("team budgets: changing clears omitted allowance; removal preserves immutable budget history and grants; repeated removal changes nothing", changed.json.budget.allowance_usd_micros === null && removed.json.budget === null && removed.json.effective_budget_usd_micros === null && removed.json.history.map((h) => h.action).join() === "set,changed,changed,changed,removed" && removedAgain.json.history.length === 5 && (await read(SM, low.json)).json.authority === "allowance", removed.text);
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const as = async (u) => {
+          const context = await browser.createBrowserContext();
+          const p = await context.newPage(); await p.setViewport({ width: 390, height: 844 });
+          p.on("pageerror", (e) => errors.push(String(e)));
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return p;
+        };
+        const open = (p, url) => p.goto(`${BASE}${url}`, { waitUntil: "networkidle0" });
+        const fill = (p, selector, value) => p.$eval(selector, (e, v) => { e.value = v; e.dispatchEvent(new Event("input", { bubbles: true })); }, String(value));
+        const text = (p, selector = "main") => p.$eval(selector, (e) => e.textContent);
+        const link = (r) => `/app/w/${W}/spend?team=${r.team.id}&month=${r.month}&request=${r.id}`;
+        const pL = await as(SL), pM = await as(SM), pO = await as(SO2), pV = await as(SV);
+        await open(pL, `/app/w/${W}/spend?team=${T}`);
+        await pL.waitForSelector("[data-budget-form]");
+        await fill(pL, '[data-budget-form] [name="amount"]', "");
+        await pL.click('[data-budget-form] button[type="submit"]');
+        await pL.waitForFunction(() => document.querySelector('[data-budget-form] [role="alert"]')?.textContent.includes("Enter the budget amount"));
+        check("budget screens: an empty required amount cannot save a zero budget", (await req(SO, "GET", env)).json.budget === null);
+        await fill(pL, '[data-budget-form] [name="amount"]', 100);
+        await fill(pL, '[data-budget-form] [name="allowance"]', 5);
+        await fill(pL, '[data-budget-form] [name="ceiling"]', 10);
+        await pL.click('[data-budget-form] button[type="submit"]');
+        await pL.waitForSelector("[data-budget-request-form]");
+        await pL.waitForFunction(() => document.querySelector('[data-budget-form] [role="status"]')?.textContent.includes("Budget saved."));
+        await pL.reload({ waitUntil: "networkidle0" });
+        await pL.waitForFunction(() => document.querySelector('[data-budget-form] [role="status"]')?.textContent.includes("Budget saved."));
+        check("budget screens: saving a budget leaves a confirmation after reload", await pL.$eval('[data-budget-form] [role="status"]', (e) => e.textContent.includes("Budget saved.")));
+
+        const months = () => pL.$$eval('input[type="month"]', (els) => els.map((e) => ({ label: e.closest("label")?.textContent, value: e.value })));
+        const initialMonths = await months();
+        const monthControl = (label) => pL.$(`input[type="month"][aria-labelledby]`).then(async () => {
+          const handles = await pL.$$('input[type="month"]');
+          for (const h of handles) if (await h.evaluate((e, word) => (e.getAttribute("aria-label") ?? document.getElementById(e.getAttribute("aria-labelledby"))?.textContent ?? [...(e.labels ?? [])].map((l) => l.textContent).join(" ")).includes(word), label)) return h;
+          throw new Error(`Month control missing: ${label}`);
+        });
+        const csvMonth = await monthControl("Export month");
+        await csvMonth.evaluate((e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(e, "2024-02"); e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true })); });
+        const afterCsv = await months();
+        check("budget screens: changing the CSV month preserves the budget month", afterCsv[0].value === "2024-02" && afterCsv[1].value === initialMonths[1].value, JSON.stringify(afterCsv));
+        const budgetMonth = await monthControl("Budget month");
+        await budgetMonth.evaluate((e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(e, "2024-03"); e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true })); });
+        const afterBudget = await months();
+        check("budget screens: changing the budget month preserves the CSV month", afterBudget[0].value === "2024-02" && afterBudget[1].value === "2024-03", JSON.stringify(afterBudget));
+        await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-request-form]");
+        const uiBudget = (await req(SO, "GET", env)).json;
+        check("budget screens: lead sets base, per-request allowance and monthly ceiling with named fields, bounds and remaining allowance", uiBudget.budget.amount_usd_micros === 100_000_000 && uiBudget.budget.allowance_ceiling_usd_micros === 10_000_000 && (await text(pL, "[data-burn]")).includes("At least") && (await text(pL, "[data-burn]")).includes("At most"), await text(pL, "[data-team-spending]"));
+        const noGoalRisk = "Spend in no goal may come from fewer than three people this month, so it can reveal one person's spend.";
+        const noGoalFigure = await pL.$eval("[data-burn]", (el) => [...el.querySelectorAll("div")].find((row) => row.querySelector("dt")?.textContent === "Spend in no goal, estimate")?.querySelector("dd")?.textContent ?? "");
+        check("budget screens: a larger team warns beside no-goal spend from fewer than three people without showing the count", uiBudget.team_member_count >= 3 && uiBudget.no_goal.few_contributors === true && !("contributor_count" in uiBudget.no_goal) && noGoalFigure.includes(noGoalRisk) && !/contributor|1 person/.test(noGoalFigure) && !(await text(pL, "[data-team-spending]")).includes("Team totals can reveal one person's spend when the team has fewer than three members."), noGoalFigure);
+        await open(pM, `/app/w/${W}/spend?team=${T}`);
+        await pM.waitForSelector('select[name="team_id"]');
+        await pM.select('select[name="team_id"]', solo);
+        await pM.$eval('select[name="team_id"]', (e) => e.closest("form").querySelector("button").click());
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Your home team is Solo"));
+        check("budget screens: a person with several teams changes only their home team for future spending periods", (await req(SM, "GET", "/spend/home-team")).json.team.id === solo && (await req(SO, "GET", env)).json.priced_spend_usd_micros === 40_000_000);
+        await pM.select('select[name="team_id"]', T);
+        await pM.$eval('select[name="team_id"]', (e) => e.closest("form").querySelector("button").click());
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Your home team is Build"));
+        await pM.reload({ waitUntil: "networkidle0" });
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Home team saved."));
+        check("budget screens: home-team confirmation survives reload and names the saved outcome", (await text(pM)).includes("Home team saved. This choice applies to future spending periods."));
+        await fill(pM, '[data-budget-request-form] [name="amount"]', 20);
+        await fill(pM, '[data-budget-request-form] [name="reason"]', "Browser budget request");
+        await pM.select('[data-budget-request-form] [name="goal"]', hidden.id);
+        await pM.click(`[data-budget-request-form] input[value="${own.key}"]`);
+        await pM.$eval('[data-budget-request-form]', (form) => { form.requestSubmit(); form.requestSubmit(); });
+        await pM.waitForFunction(() => document.querySelector("[data-budget-request-form]")?.textContent.includes("Recorded."));
+        check("budget screens: a successful request clears required draft fields", await pM.$eval('[data-budget-request-form]', (f) => f.elements.amount.value === "" && f.elements.reason.value === ""));
+        const browserRequest = (await req(SM, "GET", "/budget-requests")).json.mine.find((r) => r.reason === "Browser budget request");
+        check("budget screens: member requests with a readable goal and their own session; home-team rule is visible", (await req(SM, "GET", "/budget-requests")).json.mine.filter((r) => r.reason === "Browser budget request").length === 1 && browserRequest?.state === "waiting" && browserRequest.session_count === 1 && browserRequest.goal.id === hidden.id && (await text(pM)).includes("home team's budget recorded when its spending period opened"), JSON.stringify(browserRequest));
+        await open(pM, link(browserRequest)); await pM.waitForSelector("[data-budget-request]");
+        await pM.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("Withdraw budget request"));
+        check("budget screens: requester can withdraw but is never offered self-approval or self-decline", !(await pM.$("[data-budget-approve]")) && !(await pM.$("[data-budget-decline]")), await text(pM, "[data-budget-request]"));
+        await open(pL, link(browserRequest)); await pL.waitForSelector("[data-budget-approve]");
+        await fill(pL, '[data-budget-approve] [name="amount"]', 12);
+        await act(SO, browserRequest, "decline", { reason: "Review the scope" });
+        await pL.click('[data-budget-approve] button[type="submit"]');
+        await pL.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("Not recorded. This request changed after you read it") && !document.querySelector("[data-budget-approve]"));
+        check("budget screens: stale decision is refused visibly, takes focus and reloads the record", await pL.$eval('[data-budget-request] [role="alert"]', (e) => document.activeElement === e), await text(pL, "[data-budget-request]"));
+        await open(pM, link(browserRequest));
+        await pM.waitForFunction(() => [...document.querySelectorAll("[data-budget-request] button")].some((b) => b.textContent === "Ask for a second look"));
+        await pM.$eval("[data-budget-request]", (e) => [...e.querySelectorAll("button")].find((b) => b.textContent === "Ask for a second look").click());
+        await pM.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("waiting for a second look"));
+        await open(pO, link(browserRequest)); await pO.waitForSelector("[data-budget-approve]");
+        check("budget screens: approval amount, UTC expiry, note and decline reason fit 390 pixels", await pO.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        await fill(pO, '[data-budget-approve] [name="amount"]', 12);
+        await fill(pO, '[data-budget-approve] [name="note"]', "Finish this part");
+        await pO.click('[data-budget-approve] button[type="submit"]');
+        await pO.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("This request was granted by an approver."));
+        const recordText = await text(pO, "[data-budget-request]");
+        check("budget screens: second owner approves an amount and expiry with note; both decisions and authority survive; hidden goal and sessions stay unnamed", recordText.includes("declined this request as an approver") && recordText.includes("granted this request as an approver") && recordText.includes("Finish this part") && !recordText.includes(privateTitle) && !recordText.includes(own.key) && !(await pO.$(`[data-budget-request] a[href*="${hidden.id}"]`)), recordText);
+        await pO.waitForSelector("[data-budget-form]");
+        const phone = await pO.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, short: [...document.querySelectorAll("[data-team-spending] button, [data-team-spending] select, [data-team-spending] input:not([type=checkbox])")].filter((e) => e.getBoundingClientRect().height < 44).length }));
+        await pO.screenshot({ path: path.join(ROOT, ".next/spend-budgets-phone.png"), fullPage: true });
+        check("budget screens: budget, requests and decisions fit 390 pixels with 44-pixel controls", !phone.overflow && phone.short === 0, JSON.stringify(phone));
+        await open(pV, link(browserRequest)); await pV.waitForSelector("[data-budget-decisions]");
+        check("budget screens: viewers read records and estimates without management, request or decision forms", !(await pV.$("[data-budget-form]")) && !(await pV.$("[data-budget-request-form]")) && !(await pV.$("[data-budget-approve]")) && !(await pV.$("[data-budget-decline]")), await text(pV, "[data-team-spending]"));
+        check("budget screens: team picker contains only teams whose budget the viewer may read", await pV.$$eval("select", (els) => { const e = els.find((s) => [...(s.labels ?? [])].some((l) => l.textContent.includes("Budget team"))); return !!e && [...e.options].map((o) => o.textContent).includes("Build") && ![...e.options].some((o) => o.textContent === "Other"); }));
+        await req(SO, "POST", `/teams/${T2}/members`, { user_id: SV.id, role: "member" });
+        await open(pV, `/app/w/${W}/spend?team=${T2}`);
+        await pV.waitForFunction(() => document.querySelector("[data-team-spending]")?.textContent.includes("No team budget for this month"));
+        check("budget screens: empty team has honest absence, no invented requests and no phone overflow", (await text(pV, "[data-team-spending]")).includes("No budget requests for this month") && await pV.evaluate(() => document.documentElement.scrollWidth <= innerWidth), await text(pV, "[data-team-spending]"));
+        check("budget screens: a team without a budget has no threshold message", !(await pV.$("[data-budget-threshold]")));
+        const needsBeforeCross = (await req(SO, "GET", "/home")).json.budget_requests;
+        await open(pO, `/app/w/${W}`); await pO.waitForSelector('[data-live-status="live"]');
+        const headingBeforeCross = await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"));
+        await req(SL, "PUT", env, { amount_usd: 0.01 });
+        await open(pL, `/app/w/${W}/spend?team=${T}&month=${m}`);
+        await pL.waitForSelector('[data-budget-threshold="100"]');
+        const thresholdText = await pL.$$eval("[data-budget-threshold]", (els) => els.map((e) => e.textContent).join(" "));
+        check("budget screens: Spend states 80 and 100 percent, computation time and estimates at phone width", thresholdText.includes("80%") && thresholdText.includes("100%") && thresholdText.includes("Read on") && thresholdText.includes("estimated at list price") && await pL.evaluate(() => document.documentElement.scrollWidth <= innerWidth), thresholdText);
+        await open(pO, `/app/w/${W}/requests`);
+        await pO.evaluate((ws, me, month) => { const k = `align.lastVisit:${ws}:${me}`; localStorage.setItem(k, `${month}-01T00:00:00.000Z`); sessionStorage.removeItem(k); }, W, SO2.id, m);
+        await open(pO, `/app/w/${W}`);
+        await pO.$eval("[data-since]", (section) => [...section.querySelectorAll("button")].find((b) => b.textContent.startsWith("Show all"))?.click());
+        await pO.waitForFunction(() => document.querySelector('[data-since]')?.textContent.includes("reached 100%"));
+        const sinceCross = await text(pO, "[data-since]");
+        const headingCross = await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"));
+        check("budget screens: Since shows crossings and Needs contains no crossing row", headingCross === headingBeforeCross && sinceCross.includes("reached 80%") && sinceCross.includes("Read on") && !(await text(pO, "[data-needs]")).includes("reached 100%") && JSON.stringify((await req(SO, "GET", "/home")).json.budget_requests) === JSON.stringify(needsBeforeCross), sinceCross);
+        await pO.reload({ waitUntil: "networkidle0" });
+        await pO.$eval("[data-since]", (section) => [...section.querySelectorAll("button")].find((b) => b.textContent.startsWith("Show all"))?.click());
+        await pO.waitForFunction(() => document.querySelector('[data-since]')?.textContent.includes("reached 100%"));
+        check("budget screens: reload keeps the same crossing comparison and Needs count", (await text(pO, "[data-since]")).includes("reached 80%") && await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count")) === headingCross);
+        await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 10 });
+        const smallBudget = await req(SO, "PUT", `/teams/${T2}/budget`, { amount_usd: 1 });
+        await pV.reload({ waitUntil: "networkidle0" });
+        await pV.waitForFunction(() => document.querySelector("[data-team-spending]")?.textContent.includes("Team totals can reveal one person's spend when the team has fewer than three members."));
+        check("budget screens: a small team keeps its budget and sees the privacy sentence and cache age", smallBudget.status === 200 && smallBudget.json.team_member_count < 3 && smallBudget.json.no_goal.few_contributors === false && !(await text(pV, "[data-team-spending]")).includes(noGoalRisk) && (await text(pV, "[data-team-spending]")).includes("five minutes old"), await text(pV, "[data-team-spending]"));
+        await open(pO, link(deviceAsk.json)); await pO.waitForSelector(`[data-budget-request="${deviceAsk.json.id}"]`);
+        check("budget screens: terminal source and readable dates appear on the record", (await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(deviceAsk.json.filing_note) && !(await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(`${m} UTC`));
+        const homeRequest = (await request(SM)).json;
+        await open(pO, `/app/w/${W}`); await pO.waitForSelector(`a[href*="request=${homeRequest.id}"]`);
+        check("budget screens: Home what needs you links to the same record and contributes to its headline", Number(await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"))) > 0 && await pO.$(`[data-needs] a[href*="request=${homeRequest.id}"]`) !== null);
+        check("budget screens: Home budget rows name the filing source", (await text(pO, "[data-needs]")).includes(homeRequest.filing_note));
+        await open(pO, `/app/w/${W}/requests`); await pO.waitForSelector(`a[href*="request=${homeRequest.id}"]`);
+        check("budget screens: Requests links to the same Spend record", await pO.$eval(`a[href*="request=${homeRequest.id}"]`, (e, expected) => e.getAttribute("href") === expected, link(homeRequest)));
+        check("budget screens: request lists name the filing source", (await text(pO, "main")).includes(homeRequest.filing_note));
+        await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-form]");
+        await pL.$eval("[data-budget-form]", (f) => [...f.querySelectorAll("button")].find((b) => b.textContent === "Remove budget").click());
+        await pL.waitForFunction(() => document.querySelector("[data-budget-form]")?.textContent.includes("Budget removed."));
+        await pL.reload({ waitUntil: "networkidle0" });
+        await pL.waitForFunction(() => document.querySelector("[data-budget-form]")?.textContent.includes("Budget removed."));
+        check("budget screens: removing a budget leaves the removal confirmation after reload", (await req(SO, "GET", env)).json.budget === null && (await text(pL, "[data-budget-form]")).includes("Budget removed."));
+        await pO.setRequestInterception(true);
+        pO.on("request", (r) => r.url().endsWith(`/api/v2/workspaces/${W}/change-requests`) ? r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Could not read requests." }) }) : r.continue());
+        await open(pO, `/app/w/${W}`);
+        await pO.waitForSelector('[data-live-status="live"]');
+        check("budget screens: Home goes live even when a change-request read fails", await pO.$('[data-live-status="live"]') !== null);
+        check("budget screens: no page errors", errors.length === 0, errors.join(" | "));
+      } catch (e) { check("budget screens (Chrome) run", false, e?.stack ?? e); }
+      finally { await browser.close(); }
+    } else check("ui (Chrome) available for spending screens", false, `no Chrome at ${CHROME}`);
+    check("team budgets: schema retains all references", withDb((d) => d.prepare("PRAGMA foreign_key_check").all()).length === 0);
+  }
+  // ======== end team budgets: server acceptance ========
 
   // ==== port29:allocation ====
   // Goal sessions: agent time follows priorities (main #29), on a workspace of its own. AO owns it; team Core has a
@@ -9557,8 +10314,8 @@ try {
         const sampleReq = await text(pS);
         const sampleSummary = await text(pS, "[data-desk-summary]");
         check(
-          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request, never \"You have not proposed a change\" or \"No change requests yet\"",
-          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
+          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request on their own goal (\"your request, on your own goal\", so Decision beside it reads right, LIM-2513), never \"You have not proposed a change\" or \"No change requests yet\"",
+          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request, on your own goal/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
           sampleReq.slice(0, 400),
         );
         // U9: restoring says connected apps don't come back.
@@ -10903,6 +11660,9 @@ try {
         // never a "Loading…" on the page, and the hold reason typed into it stays.
         await open(pO, `/app/w/${XW}/goals/${GL?.id}`);
         await pO.waitForFunction(() => !!document.querySelector("#agents-on-goal") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Launch version 2 to agents"), { timeout: 15000 }).catch(() => undefined);
+        // With no shared session on the goal the hold controls are folded (LIM-2513): open them as a person would.
+        const holdFolded = await pO.$("#agents-on-goal [data-hold-folded]:not([open]) summary");
+        if (holdFolded) await holdFolded.click();
         await pO.evaluate(() => {
           const f = [...document.querySelectorAll("#agents-on-goal label")].find((x) => x.querySelector("span")?.textContent?.trim() === "Reason (optional, shown to the developers)")?.querySelector("input");
           f?.setAttribute("data-typing", "1");
@@ -10916,7 +11676,7 @@ try {
           }).observe(document.body, { childList: true, subtree: true, characterData: true });
         });
         await press(pO, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
-        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2 to agents") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
+        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2.") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
         await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const c34 = await pO.evaluate(() => ({
           gone: window.__agentsGone,
@@ -11797,16 +12557,16 @@ try {
     walk("app/api/v2");
     // Asks have no revisions in the spec (an ask's actions are state transitions, refused as wrong_state); typed requests
     // (DELETE) and holds (PUT/DELETE) aren't [action] routes and have no revisions either.
-    const REVISIONED = { alignments: "lib/v2/alignments.ts", "change-requests": "lib/v2/changes.ts", reallocations: "lib/v2/reallocations.ts" };
+    const REVISIONED = { alignments: "lib/v2/alignments.ts", "change-requests": "lib/v2/changes.ts", reallocations: "lib/v2/reallocations.ts", "budget-requests": "lib/v2/budgets.ts" };
     const STATE_ONLY = ["asks"];
     const actionsIn = (rel, name) => JSON.parse(new RegExp(`${name} = (\\[[^\\]]*\\])`).exec(readFileSync(path.join(ROOT, rel), "utf8"))?.[1] ?? "[]");
-    const listed = { alignments: actionsIn(REVISIONED.alignments, "ACTIONS"), "change-requests": actionsIn(REVISIONED["change-requests"], "CHANGE_REQUEST_ACTIONS"), reallocations: actionsIn(REVISIONED.reallocations, "REALLOCATION_ACTIONS") };
+    const listed = { alignments: actionsIn(REVISIONED.alignments, "ACTIONS"), "change-requests": actionsIn(REVISIONED["change-requests"], "CHANGE_REQUEST_ACTIONS"), reallocations: actionsIn(REVISIONED.reallocations, "REALLOCATION_ACTIONS"), "budget-requests": actionsIn(REVISIONED["budget-requests"], "BUDGET_ACTIONS") };
     check(
-      "c10 C10-2 (routes): every decision route ([action]) is classified: alignments, change requests and reallocations carry a revision; asks are state-only",
-      JSON.stringify([...new Set(actionRoutes)].sort()) === JSON.stringify([...Object.keys(REVISIONED), ...STATE_ONLY].sort()) && Object.values(listed).every((l) => l.length >= 6),
+      "c10 C10-2 (routes): every decision route ([action]) is classified: alignments, change requests, reallocations and budget requests carry a revision; asks are state-only",
+      JSON.stringify([...new Set(actionRoutes)].sort()) === JSON.stringify([...Object.keys(REVISIONED), ...STATE_ONLY].sort()) && Object.entries(listed).every(([k, l]) => l.length >= (k === "budget-requests" ? 4 : 6)),
       `${JSON.stringify(actionRoutes)} ${JSON.stringify(listed)}`,
     );
-    const tried = { alignments: {}, "change-requests": {}, reallocations: {} };
+    const tried = { alignments: {}, "change-requests": {}, reallocations: {}, "budget-requests": {} };
     const staleOk = (r) => r.status === 409 && r.json?.error === "stale_revision" && /changed after you read it/.test(r.json.message ?? "");
 
     // Alignments: e1 pending, e2 countered, e3 approved.
@@ -11900,11 +12660,29 @@ try {
       tried.reallocations[action] = staleOk(stale) && JSON.stringify(rlNow(t)) === was ? "ok" : stale.text;
     }
     const rlFresh = t3Ok.json?.state === "approved" && rlNow(t2)?.state === "countered";
+    // Budget requests carry a revision too, including the second decision round.
+    const se = await ra(RO, "PUT", `/teams/${RT}/budget`, { amount_usd: 100 });
+    const srNew = async () => (await ra(RD, "POST", `/teams/${RT}/budget-requests`, { amount_usd: 20, reason: "Finish this work" })).json;
+    const sr1 = await srNew(), sr2 = await srNew();
+    const srDeclined = await ra(RC, "POST", `/budget-requests/${sr2?.id}/decline`, { revision: 1, reason: "Scope" });
+    for (const [action, u, r] of [["approve", RC, sr1], ["decline", RC, sr1], ["withdraw", RD, sr1], ["second-look", RD, srDeclined.json]]) {
+      const snapshot = () => withDb((d) => JSON.stringify({
+        row: d.prepare("SELECT * FROM v2_budget_requests WHERE id = ?").get(r?.id),
+        decisions: d.prepare("SELECT * FROM v2_budget_request_decisions WHERE request_id = ?").all(r?.id),
+        audit: d.prepare("SELECT * FROM v2_audit WHERE object_id = ?").all(r?.id),
+      }));
+      const was = snapshot();
+      const stale = await ra(u, "POST", `/budget-requests/${r?.id}/${action}`, { revision: 0 });
+      tried["budget-requests"][action] = staleOk(stale) && snapshot() === was ? "ok" : stale.text;
+    }
+    const srMissing = await ra(RC, "POST", `/budget-requests/${sr1?.id}/decline`, { reason: "Scope" });
+    const srFresh = se.status === 200 && srDeclined.status === 200 && srMissing.status === 400 &&
+      (await ra(RC, "POST", `/budget-requests/${sr1?.id}/decline`, { revision: 1, reason: "Scope" })).json?.state === "declined";
     const uncovered = Object.entries(listed).flatMap(([k, acts]) => acts.filter((a) => a !== "mention" && tried[k][a] !== "ok").map((a) => `${k}/${a}: ${tried[k][a] ?? "not tried"}`));
     check(
-      "c10 C10-2 (every decision): each action of alignments, change requests and reallocations sent with a revision that isn't current is 409 stale_revision and changes nothing; an alignment action without a revision is 400; with the current revision each alignment action is then recorded",
-      uncovered.length === 0 && alFresh && crFresh && rlFresh,
-      `${uncovered.join(" | ")} ${JSON.stringify({ alFresh, crFresh, rlFresh })}`,
+      "c10 C10-2 (every decision): each action of alignments, change requests, reallocations and budget requests sent with a revision that isn't current is 409 stale_revision and changes nothing; an alignment action without a revision is 400; with the current revision each alignment action is then recorded",
+      uncovered.length === 0 && alFresh && crFresh && rlFresh && srFresh,
+      `${uncovered.join(" | ")} ${JSON.stringify({ alFresh, crFresh, rlFresh, srFresh })}`,
     );
     // A target change countered meanwhile names the counter's author, as a change request's and an alignment's refusal do.
     const t2Stale = await rlAct(RO, t2, "reject", { revision: 1, reason: "No" });

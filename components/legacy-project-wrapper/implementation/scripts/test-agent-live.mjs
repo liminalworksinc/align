@@ -31,7 +31,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHmac, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -173,8 +173,8 @@ const agentEnv = {
   ALIGN_ALLOW_UNSUPPORTED_NODE: "1",
 };
 const outputs = []; // every CLI and hook output, for the canary checks
-function cli(args, env = agentEnv) {
-  const r = spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8", timeout: 60_000 });
+function cli(args, env = agentEnv, cwd = ROOT) {
+  const r = spawnSync(process.execPath, [CLI, ...args], { env, cwd, encoding: "utf8", timeout: 60_000 });
   outputs.push(r.stdout ?? "", r.stderr ?? "");
   return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
@@ -373,6 +373,50 @@ try {
       srvEpochs.length === 1 && srvEpochs[0].goal_id === G.id && srvEpochs[0].goal_version_at_start === 1 && usage1 === 1,
     `${quiet1.stdout} ${JSON.stringify(srvSession)} ${JSON.stringify(srvEpochs)} ${usage1}`,
   );
+
+  // ======== team budgets: real terminal authority, sync attribution and next-turn information ========
+  const savedEstimate = sdb((d) => d.prepare("SELECT request_key, est_list_usd_micros FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, SKEY));
+  try {
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 0 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
+    const budgetSet = await ws(L, "PUT", `/teams/${PLATFORM}/budget`, { amount_usd: 0.01, allowance_usd: 0.05 });
+    const budgetRead = cli(["budget"], agentEnv, repo);
+    const budgetAsk = cli(["budget", "request", "--amount", "0.01", "--reason", "Finish this work"], agentEnv, repo);
+    const budgetRecord = sdb((d) => d.prepare("SELECT state, authority, filed_from FROM v2_budget_requests WHERE ws_id = ? AND requester_id = ? ORDER BY created_at DESC LIMIT 1").get(W, M.id));
+    check("budget: align budget reads the folder goal's team and align budget request always waits for a person under the allowance", budgetSet.status === 200 && budgetRead.code === 0 && budgetRead.stdout.includes("Teams you can choose: Platform") && budgetRead.stdout.includes("estimates at list price") && budgetAsk.code === 0 && budgetAsk.stdout.includes("waits for a person") && !/br_[A-Za-z0-9_-]+|: waiting\b/.test(budgetAsk.stdout) && budgetRecord?.state === "waiting" && budgetRecord?.filed_from === "terminal" && budgetRecord?.authority === null, budgetRead.stdout + budgetAsk.stdout + budgetAsk.stderr);
+    const localBudgetId = withDb(path.join(alignHome, "align.db"), (d) => d.prepare("SELECT local_id FROM shares WHERE workspace_id = ? AND session_key = ?").get(W, SKEY).local_id);
+    const budgetCacheFile = path.join(alignHome, "budgets-cache", `${localBudgetId}.json`);
+    const terminalSnapshot = existsSync(budgetCacheFile) ? JSON.parse(readFileSync(budgetCacheFile, "utf8")) : null;
+    check("budget: a successful terminal read refreshes the confirmed session snapshot immediately", terminalSnapshot?.team.id === PLATFORM && terminalSnapshot?.estimated_spend_usd_micros === 0, JSON.stringify(terminalSnapshot));
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 8000 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
+    const beforeBudgetSync = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-before", prompt: "Continue", cwd: repo });
+    // A change stamp invalidates the already reused team read without waiting five minutes or deleting its cache.
+    await ws(L, "PUT", `/teams/${PLATFORM}/budget`, { amount_usd: 0.01, allowance_usd: 0.05 });
+    const budgetSync = sync();
+    const budgetSnapshot = existsSync(budgetCacheFile) ? JSON.parse(readFileSync(budgetCacheFile, "utf8")) : null;
+    check("budget: the existing sync reads session attribution and the monthly team budget into its separate local cache", budgetSync.code === 0 && budgetSnapshot?.team.id === PLATFORM && budgetSnapshot?.estimated_spend_usd_micros === 8000 && budgetSnapshot?.epoch_id && !beforeBudgetSync.stdout.includes("80%"), budgetSync.stderr + JSON.stringify(budgetSnapshot));
+    const budgetTool = hook("PreToolUse", { session_id: SID, tool_name: "Read", tool_input: { file_path: path.join(repo, "README.md") }, cwd: repo });
+    const budgetToolAgain = hook("PreToolUse", { session_id: SID, tool_name: "Read", tool_input: { file_path: path.join(repo, "README.md") }, cwd: repo });
+    check("budget: a long-turn tool warning is user-only and delivered once", budgetTool.json?.systemMessage?.includes("80%") && !budgetTool.context?.includes("80%") && !budgetToolAgain.stdout.includes("80%"), budgetTool.stdout + budgetToolAgain.stdout);
+    const budgetNote = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-next", prompt: "Continue", cwd: repo });
+    const budgetAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-again", prompt: "Continue", cwd: repo });
+    check("budget: the next turn receives an informational 80 percent note once, with no command or authority", budgetNote.context?.includes('[Align] "Platform" reached 80%') && budgetNote.context.includes("Work continues.") && budgetNote.context.includes("grants no authority") && !budgetNote.context.includes("align budget") && !budgetAgain.stdout.includes("80%"), budgetNote.stdout + budgetAgain.stdout);
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 10000 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
+    await ws(L, "PUT", `/teams/${PLATFORM}/budget`, { amount_usd: 0.01 });
+    sync(); // Observe 100 percent without delivering it.
+    await ws(L, "DELETE", `/teams/${PLATFORM}/budget`);
+    sync(); // The removal's stamp must clear the due note without deleting the reused team read by hand.
+    const removedRead = cli(["budget"], agentEnv, repo);
+    check("budget: a terminal read refreshes a removed budget without deleting the cache by hand", removedRead.code === 0 && removedRead.stdout.includes("No team budget for this month."), removedRead.stdout + removedRead.stderr);
+    const afterRemoval = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-removed", prompt: "Continue", cwd: repo });
+    check("budget: the next pass after removal clears an undelivered crossing", !existsSync(budgetCacheFile) && !afterRemoval.stdout.includes("100%"), afterRemoval.stdout);
+  } finally {
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = ? WHERE ws_id = ? AND request_key = ?").run(savedEstimate.est_list_usd_micros, W, savedEstimate.request_key));
+    await ws(L, "DELETE", `/teams/${PLATFORM}/budget`);
+    // Drop the reused team read too, so no later session in this run is told about a budget that no longer exists.
+    if (existsSync(path.join(alignHome, "budgets-cache", "teams.json"))) unlinkSync(path.join(alignHome, "budgets-cache", "teams.json"));
+    sync();
+
+  }
 
   // ======== a change request that adds a limit: the goal_version directive -> one limit delta ========
   const cur = (await ws(O, "GET", `/goals/${G.id}`)).json?.goal;
