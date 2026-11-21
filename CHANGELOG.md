@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Launchers can record an expectation for a goal measure and report its outcome from Home or the request.
+  The goal page shows self-reported measure readings and their history. MCP includes these readings on goal
+  and brief reads, and includes expectations and outcomes in decision records. Server migration 28 adds these records.
+- The outcome form shows how to fix an invalid evidence link beside the field.
 - Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
   request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
 - Retrying a binding with changed details returns a conflict and leaves the original binding in place.

@@ -16,6 +16,8 @@ export function NeedRow({
   title,
   sub,
   waited,
+  waitedLabel = "Waiting ",
+  wrapText = false,
   evidence,
   action,
   href,
@@ -26,11 +28,14 @@ export function NeedRow({
   title: ReactNode;
   sub?: ReactNode;
   waited?: string;
+  waitedLabel?: string;
+  wrapText?: boolean;
   evidence?: ReactNode;
   action?: ReactNode;
   href?: string;
   selected?: boolean;
 }) {
+  const textLayout = wrapText ? "[overflow-wrap:anywhere]" : "@3xl:truncate";
   const heading = "text-[14px] font-medium text-(--text-1) group-first/need:font-semibold @3xl:group-first/need:text-[15px]";
   return (
     <li
@@ -45,20 +50,20 @@ export function NeedRow({
       <div className="whitespace-nowrap pt-0.5 text-right font-mono text-[12px] tabular-nums text-(--text-3) @3xl:order-4 @3xl:pt-0">
         {waited && (
           <>
-            <span className="sr-only">Waiting </span>
+            <span className="sr-only">{waitedLabel}</span>
             {waited}
           </>
         )}
       </div>
       <div className="col-span-2 min-w-0 @3xl:order-2 @3xl:col-span-1">
         {href ? (
-          <Link href={href} className={`${heading} block underline-offset-4 after:absolute after:inset-0 after:content-[''] hover:underline @3xl:truncate`}>
+          <Link href={href} className={`${heading} block underline-offset-4 after:absolute after:inset-0 after:content-[''] hover:underline ${textLayout}`}>
             {title}
           </Link>
         ) : (
-          <p className={`${heading} @3xl:truncate`}>{title}</p>
+          <p className={`${heading} ${textLayout}`}>{title}</p>
         )}
-        {sub && <p className="text-[13px] leading-[18px] text-(--text-2) @3xl:truncate">{sub}</p>}
+        {sub && <p className={`text-[13px] leading-[18px] text-(--text-2) ${textLayout}`}>{sub}</p>}
       </div>
       <div className="col-span-2 flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 empty:hidden @3xl:contents">
         <div className="flex min-h-[44px] max-w-full flex-[1_1_auto] flex-wrap items-center gap-1 empty:hidden @3xl:order-3 @3xl:min-h-0 @3xl:flex-none @3xl:empty:block">{evidence}</div>

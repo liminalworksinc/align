@@ -1,4 +1,5 @@
 "use client";
+import type { ExpectationView } from "@/lib/v2/expectations";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useCallback, useEffect, useState } from "react";
 import { NextAfterDecision, type NextItem } from "../../_ui/ds";
@@ -100,6 +101,10 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
   // "Since you last looked" reads again once a minute while Home stays open (specs/align/interface.md, Workspace Home),
   // and the Needs-you list with it, so its count never trails what Since shows (PR 68 audit Low 2).
   const refreshSince = reloadAll;
+  useEffect(() => {
+    window.addEventListener("focus", reloadAll);
+    return () => window.removeEventListener("focus", reloadAll);
+  }, [reloadAll]);
   // A request sent from the shell's Propose a change drawer changes this page's counts: read them again (DEFECT 6,
   // PR 68 pass 1: "Waiting on others" stayed 0 until a reload).
   useEffect(() => {
@@ -122,8 +127,8 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
     return () => clearTimeout(t);
   }, [reviewId, items, snap]);
   const [decided, setDecided] = useState<Set<string>>(new Set());
-  const onDecided = useCallback(() => {
-    if (reviewId) setDecided((d) => new Set(d).add(`cr:${reviewId}`));
+  const onDecided = useCallback((report?: NonNullable<ExpectationView["outcome"]>) => {
+    if (reviewId) setDecided((d) => new Set(d).add(`${report ? "outcome" : "cr"}:${reviewId}`));
     reloadAll();
   }, [reviewId, reloadAll]);
   /** Back to the list: close the review and put focus on its row, or on the row now in its place. */
@@ -162,7 +167,7 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
         {h?.goals && h.apps && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={h.goals.length > 0} creation={creation} />}
 
         <div className={quietList ? "hidden" : "contents"}>
-          <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={reloadToken} onItems={setItems} decided={decided} />
+          <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={reloadToken} onItems={setItems} decided={decided} onOutcomeReported={reloadAll} />
         </div>
 
         {!h ? (

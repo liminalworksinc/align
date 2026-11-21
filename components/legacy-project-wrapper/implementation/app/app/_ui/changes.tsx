@@ -1,4 +1,5 @@
 "use client";
+import { EMPTY_EXPECTATION, ExpectationFields, ExpectationRecord, expectationBody, expectationError, expectationValidationMessage } from "./expectations";
 import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, Btn, Err, Note, Pill, sentence, useAction, useApi, when } from "./kit";
@@ -130,14 +131,20 @@ function RequestRecord({
       }
       onDone();
     });
+  const [expectation, setExpectation] = useState(EMPTY_EXPECTATION);
   const next = cr.goal.version + 1;
   /** Launch or not yet: the decision's outcome is a notice, which outlives the reload (and remount) that follows. */
   const decideLaunch = (action: "launch" | "not_yet") =>
     void act.run(async () => {
       setNotice(null);
       try {
-        await api(`${path}/${action}`, { body: { revision: cr.revision } });
+        const error = action === "launch" ? expectationError(expectation) : null;
+        if (error) throw new Error(error);
+        await api(`${path}/${action}`, { body: { revision: cr.revision, ...(action === "launch" ? expectationBody(expectation) : {}) } });
       } catch (e) {
+        if (action === "launch" && e instanceof ApiError && e.code === "bad_request") {
+          throw new Error(expectationValidationMessage(e.message));
+        }
         if (!(e instanceof ApiError) || e.status !== 409) throw e;
         setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}` });
         onDone(); // the request moved on: show it as it is now
@@ -260,6 +267,8 @@ function RequestRecord({
         ))}
       </div>
       <Revisions cr={cr} me={me} />
+      <ExpectationRecord ws={ws} cr={cr} me={me} onDone={onDone} />
+      {cr.can.launch && <ExpectationFields measures={cr.launch_measures} value={expectation} onChange={setExpectation} />}
       <div className="mt-3 flex flex-wrap gap-2">
         {cr.can.acknowledge && cr.condition && (
           <Btn kind="secondary" disabled={act.busy} onClick={acknowledge}>

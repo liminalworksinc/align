@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 27;
+export const SCHEMA_VERSION = 28;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -91,6 +91,8 @@ type PropRule = readonly string[] | "count" | RegExp;
  *  approved change request in v2_value_reports; the value_reported event carries only this). */
 export const ESTIMATES = ["same_day", "two_to_three_days", "about_a_week", "longer", "would_not_be_decided"] as const;
 
+export const OUTCOMES = ["met", "not_met", "cant_tell"] as const;
+
 /** Every event name and the props it may carry. */
 export const EVENT_PROPS = {
   access_requested: { interest: ["try", "evaluate"], via: ["form", "value_card"] },
@@ -120,11 +122,14 @@ export const EVENT_PROPS = {
   first_request: { type: ["replan", "checkpoint", "switch_goal"] },
   first_hold: {},
   first_launch: {},
+  first_expectation: {},
+  outcome_reported: { outcome: OUTCOMES },
+  first_reading: {},
 } as const satisfies Record<string, Record<string, PropRule>>;
 export type EventName = keyof typeof EVENT_PROPS;
 export type EventProps = Record<string, string | number>;
 
-/** Recorded at most once per workspace (the unique index v2_events_once_ws in lib/v2/db.ts lists the same names). */
+/** Recorded at most once per workspace (enforced by the workspace event indexes in lib/v2/db.ts). */
 export const ONCE_PER_WORKSPACE: readonly EventName[] = [
   "workspace_created",
   "code_redeemed",
@@ -142,6 +147,8 @@ export const ONCE_PER_WORKSPACE: readonly EventName[] = [
   "first_request",
   "first_hold",
   "first_launch",
+  "first_expectation",
+  "first_reading",
 ];
 
 /** Recorded at most once per person in a workspace (the unique index v2_events_once_person in lib/v2/db.ts lists the

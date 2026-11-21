@@ -30,6 +30,37 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [x] LIM-2520: Record launch expectations, outcomes and measure readings
+
+- **Owner:** Align goals, change requests, Home and MCP contracts
+- **Direction:** Let a launcher state an expectation for a goal measure, report what
+  happened, and record self-reported measure readings independently of goal versions.
+  Show validation messages beside the affected outcome or reading field, using the form's labels.
+- **Conclusion:** Keep expectations with the launch decision and readings with the
+  measure id. A reading leaves goal content and agent delivery unchanged.
+- **Completion prerequisites:** PROVENANCE-001
+- **Implementation and evidence:**
+  - [x] Specify the launch, outcome, reading, visibility and retention rules.
+  - [x] Implement the records, app flows, MCP reads and product events in server schema 28.
+  - [x] Exercise both launch paths, access, correction, history, retention and mobile layout.
+    The packet checks passed in `scripts/test-v2.mjs`.
+  - [x] Verify the upgrade from schema 27 to 28 and a fresh schema 28 database.
+    Both SQLite checks passed. The upgrade preserved the stored goal version, change request and binding origin.
+  - [x] Show which field needs a correction when an outcome or reading is refused.
+    The Home browser regression reproduced the raw field name before the fix and passed with the inline message.
+  - [x] Run the full test gate on Node 24 and validate the specifications.
+    `ALIGN_TEST_PORT=4400 npm test` passed 2,054 checks on Node 24.22.3 with zero failures.
+    `litai spec validate specs/align --id-prefix align` passed for all eight documents.
+
+- **Merge verification:** The first 27 migration strings and their source prefix match the lower branch exactly.
+  Migration 28 adds expectation records. Schema 27 records survive the upgrade, and fresh databases contain all
+  budget, expectation, outcome and reading tables. Home retains both needs kinds, rankings and partial-read states.
+  Lint, route generation, app and package typechecks, package build and four script syntax checks pass on Node 26.3.0.
+  Budget domain checks pass 69/0, and eight listener-free package files pass 352/0. Both serial latency cases skip
+  because bare process startup exceeds the host-load cutoff. Listener-dependent checks remain for the operator.
+  The local database schema matches the lower branch. One lint rerun raced with test-directory cleanup;
+  the final sequential lint run passes. The index and history remain untouched.
+
 ### [x] PROVENANCE-001: Show how sessions came to count toward goals
 
 - **Priority:** P0
@@ -219,6 +250,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] Specify the route, CSV fields, privacy and phone controls before implementation.
   - [x] Implement the export route, shared month validation, exact table row and amount parity with all no-goal usage unallocated, plus the Spend export form.
   - [x] HTTP authorization, the browser download and the 390 pixel controls are covered in test-v2. The budget domain suite covers CSV totals and privacy across retention.
+
 
 ### [x] TX-001: Recover from transaction and preview setup failures
 

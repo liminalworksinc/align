@@ -182,6 +182,8 @@ export interface ChangeRequest {
   launch_decided_by: { id: string; name: string } | null;
   launch_decided_at: string | null;
   condition: { revision: number; text: string; acknowledged_by: { id: string; name: string } | null; acknowledged_at: string | null } | null;
+  expectation: import("@/lib/v2/expectations").ExpectationView | null;
+  launch_measures: Goal["measures"];
   evidence_count: number;
   approved_without_evidence: boolean | null;
   can: Record<"approve" | "approve_and_launch" | "reject" | "counter" | "accept_counter" | "acknowledge" | "withdraw" | "rebase" | "add_evidence" | "launch" | "not_yet", boolean>;

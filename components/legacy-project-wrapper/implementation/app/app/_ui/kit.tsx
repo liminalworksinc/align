@@ -30,6 +30,10 @@ export function sentence(message: string): string {
   return /[.!?…]["”]?$/.test(s) ? s : `${s}.`;
 }
 
+export function labelledFieldError(message: string | null, field: string, label: string): string | null {
+  return message?.startsWith(`${field} `) ? sentence(`${label}${message.slice(field.length)}`) : null;
+}
+
 /** Reads and writes in flight through api(), and when the last one settled: the live stream (_ui/live.ts) opens once
  *  the page's own reads have gone quiet, so it never competes with them. */
 export const apiActivity = { inflight: 0, settledAt: 0 };
@@ -393,12 +397,20 @@ const fieldClass = "w-full rounded-[10px] border border-(--edge) bg-zinc-50 px-3
 /** A labelled control. The label still wraps the control (a click on it focuses the control), but the control's
  *  accessible name is the label's text alone (aria-labelledby) and the hint is its description: a <select> named by a
  *  wrapping label would otherwise be read with every one of its options ("Role Member Viewer Owner"). */
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+export function Field({ label, children, hint, error }: { label: string; children: ReactNode; hint?: string; error?: string | null }) {
   const id = useId();
-  const control =
-    isValidElement<{ "aria-label"?: string; "aria-labelledby"?: string; "aria-describedby"?: string }>(children) && !children.props["aria-label"] && !children.props["aria-labelledby"]
-      ? cloneElement(children, { "aria-labelledby": `${id}-l`, ...(hint ? { "aria-describedby": `${id}-h` } : {}) })
-      : children;
+  const descriptions = [hint && `${id}-h`, error && `${id}-e`].filter(Boolean).join(" ");
+  let control = children;
+  if (isValidElement<{ "aria-label"?: string; "aria-labelledby"?: string; "aria-describedby"?: string; "aria-invalid"?: boolean }>(children)) {
+    const needsLabel = !children.props["aria-label"] && !children.props["aria-labelledby"];
+    if (needsLabel || error) {
+      control = cloneElement(children, {
+        ...(needsLabel ? { "aria-labelledby": `${id}-l` } : {}),
+        ...(descriptions ? { "aria-describedby": [children.props["aria-describedby"], descriptions].filter(Boolean).join(" ") } : {}),
+        ...(error ? { "aria-invalid": true } : {}),
+      });
+    }
+  }
   return (
     <label className="mb-3 block">
       <span id={`${id}-l`} className="mb-1 block text-[14px] text-zinc-600">
@@ -409,6 +421,9 @@ export function Field({ label, children, hint }: { label: string; children: Reac
         <span id={`${id}-h`} className="mt-1 block text-[13px] text-zinc-500">
           {hint}
         </span>
+      )}
+      {error && (
+        <span id={`${id}-e`} role="alert" className="mt-1 block text-[14px] font-medium text-red-700">{error}</span>
       )}
     </label>
   );

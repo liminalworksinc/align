@@ -543,11 +543,11 @@ await test("former-member replacement covers every new actor column; workspace p
   await db.tx(() => { db.run("DELETE FROM v2_members WHERE ws_id = ? AND user_id = 'owner'", W); pseudonymise(db.sql, W, "owner", new Date().toISOString(), "test-secret"); });
   assert.equal(spend.getBudgetRequest(pp("owner2"), r.id).decisions[0].actor.name, "Former member #1");
   await db.tx(() => purgeWorkspace(db.sql, W));
-  for (const t of ["v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_spend_home_teams"]) assert.deepEqual(db.all(`SELECT * FROM ${t}`), []);
+  for (const t of ["v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_spend_home_teams", "v2_budget_crossings", "v2_budget_stamps", "v2_expectations", "v2_outcome_reports", "v2_measure_readings"]) assert.deepEqual(db.all(`SELECT * FROM ${t}`), []);
 });
 await test("migration 24 leaves every pre-feature period without a home team and preserves unallocated spend", async () => {
   const migrations = runInNewContext(/const MIGRATIONS: string\[\] = (\[[\s\S]*?\n\]);/.exec(readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8"))[1]);
-  assert.equal(migrations.length, 27);
+  assert.equal(migrations.length, 28);
   const old = new DatabaseSync(":memory:");
   try {
     old.exec("CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY)");
@@ -566,6 +566,68 @@ await test("migration 24 leaves every pre-feature period without a home team and
     assert.deepEqual(old.prepare("SELECT * FROM v2_spend_rollups").get(), retained);
     assert.deepEqual(old.prepare("PRAGMA foreign_key_check").all(), []);
   } finally { old.close(); }
+});
+await test("migration 28 preserves schema 27 records and adds empty expectation, outcome and reading tables", async () => {
+  await budget();
+  goal("g_upgrade");
+  await usage(session(), "g_upgrade", 80_000_000);
+  await ask();
+  db.run("INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, status, content_hash, created_by, created_at) SELECT ws_id, id, version, title, measures_json, anchors_json, status, 'unchanged-hash', owner_id, created_at FROM v2_goals WHERE id = 'g_upgrade'");
+  db.run("INSERT INTO v2_change_requests (id, ws_id, goal_id, requester_id, state, revision, base_version, changes_json, reason, created_at, updated_at) VALUES ('cr_upgrade', ?, 'g_upgrade', 'member', 'pending', 1, 1, '{}', 'Keep this request', '2030-01-01', '2030-01-01')", W);
+  const migrations = runInNewContext(/const MIGRATIONS: string\[\] = (\[[\s\S]*?\n\]);/.exec(readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8"))[1]);
+  const old = new DatabaseSync(":memory:");
+  const added = ["v2_expectations", "v2_outcome_reports", "v2_measure_readings"];
+  try {
+    old.exec("CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT, email TEXT); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY); CREATE TABLE ba_session (id TEXT PRIMARY KEY, expiresAt TEXT, createdAt TEXT)");
+    migrations.slice(0, 27).forEach((m) => old.exec(m));
+    const tables = old.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+    old.exec("PRAGMA foreign_keys = OFF");
+    for (const table of tables) {
+      const columns = old.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name);
+      const insert = old.prepare(`INSERT INTO ${table} (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`);
+      for (const row of db.all(`SELECT * FROM ${table} ORDER BY rowid`)) insert.run(...columns.map((c) => row[c]));
+    }
+    old.exec("PRAGMA foreign_keys = ON; PRAGMA user_version = 27");
+    const before = tables.map((table) => old.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    old.exec(migrations[27]);
+    old.exec("PRAGMA user_version = 28");
+    assert.equal(old.prepare("PRAGMA user_version").get().user_version, 28);
+    assert.deepEqual(tables.map((table) => old.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()), before);
+    for (const table of added) {
+      assert.deepEqual(old.prepare(`SELECT * FROM ${table}`).all(), []);
+      assert.deepEqual(db.all(`SELECT * FROM ${table}`), []);
+    }
+    assert.deepEqual(old.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally { old.close(); }
+});
+await test("Home keeps budget requests and due outcomes together, including ranking and read failures", async () => {
+  const { workspaceHome } = await import("../lib/v2/home.ts");
+  const { reportChangeOutcome } = await import("../lib/v2/changes.ts");
+  const { buildNeeds, ORDERS, KIND_WORDS } = await import("../app/app/_ui/home/needs.ts");
+  await budget();
+  const request = await ask();
+  goal("g_outcome");
+  db.run("INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, status, content_hash, created_by, created_at) SELECT ws_id, id, version, title, measures_json, anchors_json, status, 'unchanged-hash', owner_id, created_at FROM v2_goals WHERE id = 'g_outcome'");
+  db.run("INSERT INTO v2_change_requests (id, ws_id, goal_id, requester_id, state, revision, base_version, changes_json, reason, launch, version, created_at, updated_at) VALUES ('cr_outcome', ?, 'g_outcome', 'member', 'approved', 1, 1, '{}', 'Record an outcome', 'launched', 1, '2030-01-01', '2030-01-01')", W);
+  db.run("INSERT INTO v2_expectations (change_request_id, ws_id, goal_id, goal_version, measure_id, measure_text, expected, due_on, assignee_id, created_at) VALUES ('cr_outcome', ?, 'g_outcome', 1, 'measure', 'Completed work', 'One result', '2030-01-15', 'lead', '2030-01-01')", W);
+  const home = workspaceHome(pp("lead"));
+  assert.equal(home.outcomes.waiting_on_me[0].change_request_id, "cr_outcome");
+  assert.equal(home.budget_requests.waiting_on_me[0].id, request.id);
+  assert.ok(Array.isArray(home.budget_crossings));
+  const input = { ws: W, me: "lead", crs: [], asks: [], alignments: [], apps: [], sends: [], requests: [],
+    outcomes: home.outcomes.waiting_on_me, budgets: home.budget_requests.waiting_on_me };
+  const needs = buildNeeds(input);
+  assert.deepEqual(needs.unknown, []);
+  assert.deepEqual(needs.rows.map((r) => [r.kind, r.phase]), [["budget_request", "needs_you"], ["outcome", "needs_you"]]);
+  assert.deepEqual(buildNeeds({ ...input, outcomes: null, budgets: null }).unknown, ["outcomes due", "budget requests"]);
+  for (const order of Object.values(ORDERS)) {
+    assert.equal(new Set(order).size, order.length);
+    assert.deepEqual([...order].sort(), Object.keys(KIND_WORDS).sort());
+  }
+  await reportChangeOutcome(pp("lead"), "g_outcome", "cr_outcome", { outcome: "met" });
+  const answered = workspaceHome(pp("lead"));
+  assert.deepEqual(answered.outcomes.waiting_on_me, []);
+  assert.equal(answered.budget_requests.waiting_on_me[0].id, request.id);
 });
 await test("home choice is personal, membership-bound, and affects only later epochs", async () => {
   await budget();

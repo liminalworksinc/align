@@ -52,6 +52,9 @@ The events, where they are recorded and what they may carry:
 | `first_change_request` | the workspace's first change request made through the API or web app | the workspace, the requester | none |
 | `first_approval` | the workspace's first approved change request (launched or not; unchanged by the launch step) | the workspace, the approver | none |
 | `first_launch` | the workspace's first launch of an approved change request (alone or in an approve and launch) | the workspace, the launcher | none |
+| `first_expectation` | the workspace's first expectation recorded at launch | the workspace, the launcher | none |
+| `outcome_reported` | an expectation answer or correction is recorded | the workspace, the reporter | `outcome`: `met`, `not_met` or `cant_tell` |
+| `first_reading` | the workspace's first self-reported measure reading | the workspace, the person | none |
 | `first_directive` | the workspace's first directive that reached a session | the workspace, none | `kind` |
 | `first_mcp_read` | the workspace's first MCP tool call | the workspace, the person | `client`: `app` or `device` |
 | `loi_sent` | the operator records it | the workspace, none | `note_ref` |
@@ -84,6 +87,11 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 
 - **WHEN** an approver approves a workspace's first change request and nobody launches it
 - **THEN** the workspace has `first_approval` and no `first_launch` (and the approval wrote no directive, so no `first_directive` from it); the launch then records `first_launch`, with no props, once
+
+#### Scenario: Expectations, outcomes and readings
+
+- **WHEN** two launches include expectations, a person reports an outcome and corrects it, and people record two readings
+- **THEN** there is one `first_expectation`, one `first_reading` and one `outcome_reported` for each recorded answer, carrying only its fixed choice. Later expectations and readings do not produce another first event after those events expire
 
 #### Scenario: Sample workspace
 

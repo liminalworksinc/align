@@ -4,6 +4,8 @@ import type { BudgetRequestView } from "@/lib/v2/budgets";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery, type NextItem } from "../ds";
+import { OutcomeForm } from "../expectations";
+import type { DueExpectation } from "@/lib/v2/expectations";
 import { api, useApi } from "../kit";
 import { readValue } from "./value-cache";
 import type { Alignment, ChangeRequest, Goal } from "../types";
@@ -187,6 +189,7 @@ export function NeedsList({
   reloadToken = 0,
   onItems,
   decided,
+  onOutcomeReported,
 }: {
   ws: string;
   me: string;
@@ -205,12 +208,13 @@ export function NeedsList({
   onItems?: (items: NextItem[] | null | undefined) => void;
   /** Rows decided on this page (keys): when one leaves Needs you it stays in place, greyed, until the filter changes. */
   decided?: ReadonlySet<string>;
+  onOutcomeReported: () => void;
 }) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
   const asks = useApi<{ asks: AskLite[] }>(`${W}/asks?state=open,accepted,done,declined`);
   const al = useApi<Groups<Alignment>>(`${W}/alignments`);
-  const home = useApi<{ apps: { items: AppLite[] } | null; budget_requests: { waiting_on_me: BudgetRequestView[]; mine: BudgetRequestView[]; next_cursor: string | null } | null }>(`${W}/home`);
+  const home = useApi<{ outcomes: { waiting_on_me: DueExpectation[] } | null; apps: { items: AppLite[] } | null; budget_requests: { waiting_on_me: BudgetRequestView[]; mine: BudgetRequestView[]; next_cursor: string | null } | null }>(`${W}/home`);
   const goals = useApi<{ goals: Goal[] }>(`${W}/goals`);
   // The approver rule's other read: this workspace's role and the teams this person leads.
   const wsList = useApi<{ workspaces: { id: string; role: "owner" | "member" | "viewer"; teams: { id: string; role: "lead" | "member" }[] }[] }>("/api/v2/workspaces");
@@ -260,6 +264,7 @@ export function NeedsList({
         asks: asks.data?.asks ?? null,
         alignments: al.data ? [...al.data.waiting_on_me, ...al.data.mine, ...al.data.others] : null,
         apps: home.data?.apps?.items ?? null,
+        outcomes: home.error ? null : home.data?.outcomes?.waiting_on_me ?? null,
         budgets: home.data?.budget_requests ? [...new Map([...home.data.budget_requests.waiting_on_me, ...home.data.budget_requests.mine].map((r) => [r.id, r])).values()] : null,
         requests: reqs.groups,
         sends: sent.sends,
@@ -267,7 +272,7 @@ export function NeedsList({
         declinedSeen: declined.seen ?? undefined,
         activeGoals,
       }),
-    [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends, approver, declined.seen, activeGoals],
+    [ws, me, crList, asks.data, al.data, home.data, home.error, reqs.groups, sent.sends, approver, declined.seen, activeGoals],
   );
   // Opening a returned declined request's review marks it seen, so it leaves Needs you (into Done) on the next read.
   const markSeen = declined.mark;
@@ -279,11 +284,12 @@ export function NeedsList({
   // deliberate cap stays in the rank note, with one short visible line.
   const unknown: Unknown[] = [...unreadSources, ...(sent.failed ? (["deliveries to apps"] as const) : []), ...(reqs.failed ? (["requests to agents"] as const) : [])].filter((x, i, a) => a.indexOf(x) === i);
   const capped = reqs.unchecked + sent.unchecked;
-  const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
   // A row decided here stays in place, greyed, until the filter changes (founder ruling): captured when the page marks it
   // decided, from the rows as they were, and dropped when the phase changes.
   const [stuck, setStuck] = useState<Map<string, { row: Need; index: number }>>(new Map());
-  const needsNow = useMemo(() => inPhase(rows, "needs_you"), [rows]);
+  const currentRows = useMemo(() => rows.filter((r) => r.kind !== "outcome" || !stuck.has(r.key)), [rows, stuck]);
+  const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(currentRows, p.value).length])) as Record<NeedPhase, number>;
+  const needsNow = useMemo(() => inPhase(currentRows, "needs_you"), [currentRows]);
   const lastNeeds = useRef(needsNow);
   useEffect(() => {
     if (!decided?.size) return;
@@ -297,11 +303,11 @@ export function NeedsList({
   });
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const list: (Need & { stuck?: boolean })[] = inPhase(rows, phase).filter((n) => !needle || [n.goal?.title, n.cause, n.quote, n.who, KIND_WORDS[n.kind]].join(" ").toLowerCase().includes(needle));
+    const list: (Need & { stuck?: boolean })[] = inPhase(currentRows, phase).filter((n) => !needle || [n.goal?.title, n.cause, n.quote, n.who, KIND_WORDS[n.kind]].join(" ").toLowerCase().includes(needle));
     if (phase === "needs_you" && !needle)
       for (const [k, { row, index }] of [...stuck].sort((a, b) => a[1].index - b[1].index)) if (!list.some((r) => r.key === k)) list.splice(Math.min(index, list.length), 0, { ...row, stuck: true });
     return list;
-  }, [rows, phase, q, stuck]);
+  }, [currentRows, phase, q, stuck]);
 
   // Every read refused or failed (a signed-in non-member gets 404 on all of them): say so, never "Nothing needs you".
   const unreadable = !loading && cr.error !== null && asks.error !== null && al.error !== null && home.error !== null;
@@ -412,10 +418,12 @@ export function NeedsList({
             n.stuck ? (
               <NeedRow
                 key={n.key}
-                kind="Decided"
+                kind={n.outcome ? "Outcome reported" : "Decided"}
                 tone="draft"
                 title={<span className="text-(--text-3)">{n.goal?.title ?? n.cause}</span>}
-                sub="You decided this just now. It leaves Needs you when you change the filter."
+                sub={n.outcome ? `${n.cause} · You reported the outcome.` : "You decided this just now. It leaves Needs you when you change the filter."}
+                evidence={n.outcome ? <EvidenceLabel kind="self" size="s" /> : undefined}
+                wrapText={!!n.outcome}
                 href={needHref(ws, n, reviewBase)}
               />
             ) : (
@@ -425,9 +433,13 @@ export function NeedsList({
               tone={n.tone}
               title={n.goal?.title ?? n.cause}
               sub={n.goal ? (n.who ? `${n.cause} · ${n.who}` : n.cause) : (n.who ?? undefined)}
-              waited={n.since ? waited(n.since.at) : "time not recorded"}
+              waited={n.outcome
+                ? n.outcome.days_due === 0 ? "Due today" : `${n.outcome.days_due} ${n.outcome.days_due === 1 ? "day" : "days"} overdue`
+                : n.since ? waited(n.since.at) : "time not recorded"}
+              waitedLabel={n.outcome ? "" : undefined}
+              wrapText={!!n.outcome}
               evidence={
-                n.kind === "decide" && n.phase === "needs_you" && n.cr && !hasEvidence(n.cr) ? (
+                n.outcome ? <EvidenceLabel kind="self" size="s" /> : n.kind === "decide" && n.phase === "needs_you" && n.cr && !hasEvidence(n.cr) ? (
                   <span className="text-[12px] text-(--text-3)">No evidence attached</span>
                 ) : n.kind === "launch" && n.phase !== "done" && n.cr?.approved_without_evidence ? (
                   // The approval was recorded with no links (the server's own flag); the launcher should know.
@@ -440,7 +452,13 @@ export function NeedsList({
                 )
               }
               action={
-                n.action?.opens === "goal" && n.goal ? (
+                n.outcome ? (
+                  <OutcomeForm ws={ws} goal={n.outcome.goal.id} request={n.outcome.change_request_id} onAnswered={() => {
+                    const index = needsNow.findIndex((row) => row.key === n.key);
+                    setStuck((m) => new Map(m).set(n.key, { row: n, index }));
+                    onOutcomeReported();
+                  }} />
+                ) : n.action?.opens === "goal" && n.goal ? (
                   // Propose again: on the goal page, where a change is proposed; opening it marks the decline as seen.
                   // TODO(LIM-2472 r2): once r2-shell's "Propose a change" drawer is on this branch, open it with this
                   // goal pre-filled instead of navigating to the goal page.

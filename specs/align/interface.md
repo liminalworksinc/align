@@ -597,7 +597,7 @@ none), and a search field ("Search") when the filter holds more than 8 rows. A r
 pill, the goal's title (a link to what the row opens), a line saying who asked or what caused it and, when it is
 someone else's move, whose (such as "Waiting on <names>" or "<names> can launch it"), how long it has waited ("time not recorded" when Align has no time),
 its evidence, and at most one outlined action. The kinds are "Approved, not launched" (**Launch v<n>**), "Decision"
-(**Review**, its line leading with what the request changes, then "<requester>'s request"), "Your request came back"
+(**Review**, its line leading with what the request changes, then "<requester>'s request"), "Outcome due" (**Report outcome**), "Your request came back"
 (**See the change**, **See the condition** or **Update to v<n>**), "Declined" (**Propose again**), "Agent declined" (a
 request to agents that a session declined, **Open the requests**), "Team ask" (**Accept or decline** or **Mark
 done**), "Budget request" (**Review budget request** for a decision, **Ask for a second look** for an eligible declined own request), "Alignment" (**Review** or **Accept the change**) and "Launched, not sent" ("Align has not sent v<n> to the
@@ -644,7 +644,7 @@ created gets no line, like their other own actions; a later saved version's line
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
 bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`, `declined`), `asks`
-(`waiting_on_me`), `alignments` (`waiting_on_me`, `waiting_on_others`), `goals` and `apps` (`everyone`, `items`),
+(`waiting_on_me`), `alignments` (`waiting_on_me`, `waiting_on_others`), `outcomes` (`waiting_on_me`), `goals` and `apps` (`everyone`, `items`),
 each `null` when the server could not read it. Every queue item SHALL carry `next` (what it needs) and `waiting_on`
 (the people it waits on). An open change request waits on its approvers to decide (`waiting_on` is the effective
 approval set, and empty when nobody can approve it yet); pending behind the goal's current version, on its requester to
@@ -840,6 +840,27 @@ read returns the same item (`align_get_goal_activity`), it SHALL carry the same 
 
 - **WHEN** a goal has two bound sessions that reported activity, a checkpoint request one session's developer accepted and another declined, a launched change whose directive a session received, and a resumed session whose machine sent no receipt yet
 - **THEN** the Agent activity card shows "Agent reported", each request answer "Agent reported", the value card's delivery line "Receipt" and the Sessions tab's "Resume sent, not yet received" "Not observed", one label each, the same label the Home and Apps use
+
+### Requirement: Home shows outcomes due
+
+Outcomes SHALL rank after budget requests in the approver order and after launches in the requester order.
+The Home read SHALL return unanswered expectations
+assigned to the caller with `due_on` no later than today in UTC, provided the caller can still read the request
+and answer. Each row SHALL show the goal title, measure text
+at launch, expected value, time due, "Self-reported", and the three outcome choices, with optional note and
+evidence link. After an answer the row SHALL grey out in place. When the read fails, the count SHALL be partial
+and Home SHALL show its read error. Home SHALL refresh outcomes with its other reads and when the window regains
+focus.
+
+#### Scenario: An expectation is due
+
+- **WHEN** the launcher opens Home on or after the UTC due date with an unanswered expectation
+- **THEN** it appears once under Needs you, below decisions and launches, and answering it greys the row in place
+
+#### Scenario: Outcomes could not be read
+
+- **WHEN** Home reads its other items but the outcomes read fails
+- **THEN** the count is partial and Home identifies the read that failed
 
 ### Requirement: Home first-run card
 
@@ -1184,7 +1205,7 @@ and a closed "Details" disclosure.
 #### Scenario: Confirm before sending
 
 - **WHEN** the person presses **Review this decision**
-- **THEN** a focused "Confirm: <decision>" shows Acting as (their name and part), On (the exact revision, whose request on which goal, and its base version), Decision, what they entered (or "Nothing. This decision needs no text."), What happens (the expected state change) and Launch ("Approval is not launch. Agents stay on version <n> until someone who can launch it does.", or for Approve and launch that it does both, or for Decline and Withdraw that nothing goes to launch); **Back** returns with the input kept; **Confirm: <decision>** sends the same body as before (`{revision, note}` to `approve` or `approve_and_launch`; `{revision, changes, note, condition}` to `counter`, Accept if… sending the request's own changes; `{revision, reason}` to `reject`; `{revision}` to `accept_counter` and `withdraw`; `{revision}` of the condition to `acknowledge`) and then shows "Recorded: …" on the reloaded card
+- **THEN** a focused "Confirm: <decision>" shows Acting as (their name and part), On (the exact revision, whose request on which goal, and its base version), Decision, what they entered (or "Nothing. This decision needs no text."), What happens (the expected state change) and Launch ("Approval is not launch. Agents stay on version <n> until someone who can launch it does.", or for Approve and launch that it does both, or for Decline and Withdraw that nothing goes to launch); **Back** returns with the input kept; **Confirm: <decision>** sends the same body as before (`{revision, note}` to `approve`, optionally with `expectation` for `approve_and_launch`; `{revision, changes, note, condition}` to `counter`, Accept if… sending the request's own changes; `{revision, reason}` to `reject`; `{revision}` to `accept_counter` and `withdraw`; `{revision}` of the condition to `acknowledge`) and then shows "Recorded: …" on the reloaded card
 
 #### Scenario: The request changed before sending
 
@@ -1204,7 +1225,7 @@ and a closed "Details" disclosure.
 #### Scenario: Approved, not launched
 
 - **WHEN** a request is approved and not launched
-- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>", and a **Not yet** on a card left open while someone said not yet elsewhere with 409 `wrong_state` "<name> already decided not yet, so nothing changes: …", shown the same way: E2E-WEB cycle 11 W2). A "Not recorded. <message>" line keeps the server's message as it was written, adding only a full stop when it has none: a message that opens with a person's name keeps the name as they wrote it ("Not recorded. carol already decided not yet, …" on a card that says "carol decided not yet"), never capitalised (`scripts/test-v2.mjs` "c12 C12-1 (ui, E2E-WEB cycle 12): ..."). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1>." (the review drawer's wording) or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (with optional `expectation` for `launch`; the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>", and a **Not yet** on a card left open while someone said not yet elsewhere with 409 `wrong_state` "<name> already decided not yet, so nothing changes: …", shown the same way: E2E-WEB cycle 11 W2). A "Not recorded. <message>" line keeps the server's message as it was written, adding only a full stop when it has none: a message that opens with a person's name keeps the name as they wrote it ("Not recorded. carol already decided not yet, …" on a card that says "carol decided not yet"), never capitalised (`scripts/test-v2.mjs` "c12 C12-1 (ui, E2E-WEB cycle 12): ..."). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1>." (the review drawer's wording) or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
 
 #### Scenario: The list after a launch
 
@@ -1296,6 +1317,41 @@ Every change request card on the goal page SHALL show (the Requests tab lists re
 
 - **WHEN** the requester adds a pull request link labelled "Pen-test vendor contract"
 - **THEN** the card lists "Pull request", "Pen-test vendor contract" linking to the URL in a new tab with `rel="noopener noreferrer"`, the URL's host, "by you" and "Self-reported", and approving it afterwards shows "Approved with 1 evidence link, none verified."
+
+### Requirement: Launch expectations and outcomes in the app
+
+When the version being launched has measures, the goal page and Requests drawer SHALL offer an optional collapsed
+"What do you expect this to change?" block for Launch or Approve and launch, with labelled fields for the measure from the version being launched,
+expected value, date and evidence. The existing form rules SHALL apply. The launched request SHALL show
+"Expected: <text> by <date>" and "Not answered yet" or "Reported met", "Reported not met" or "Reported can't tell"
+with who and when, labelled self-reported. The request SHALL offer an early answer and an eligible correction
+using the same outcome form as Home. Validation messages for the optional expectation fields SHALL use their
+visible labels. The outcome form SHALL display validation errors for the note or evidence link next to the
+affected field and associate the message with the input. A non-HTTPS link SHALL show "Use an HTTPS link." and
+leave the outcome unrecorded and the entered values available to edit.
+
+#### Scenario: Launch with or without an expectation
+
+- **WHEN** a launcher opens the launch controls on a request that launches a version with measures
+- **THEN** launching needs no expectation, and opening the optional block lets them choose from the exact version's measures and review what they entered before confirming approval and launch
+
+#### Scenario: An outcome link uses HTTP
+
+- **WHEN** the launcher enters an HTTP link in Evidence link (HTTPS) and answers from Home or the request
+- **THEN** "Use an HTTPS link." appears beside the field, the answer stays unrecorded, and the launcher can edit or remove the link and answer again
+
+### Requirement: Measure readings on the goal page
+
+Each measure SHALL show its latest reading as "<value>, self-reported by <name>, <time>" or "No reading yet".
+Readers SHALL be able to open the last 20 readings on demand. People allowed to record a reading SHALL see a
+labelled input and save control. On a failed read the value or history SHALL show an error, with the value
+unknown. A validation error for the reading value SHALL appear beside the Reading value input and be associated
+with it. The controls SHALL fit a 390 pixel screen.
+
+#### Scenario: A person records a reading
+
+- **WHEN** a goal's team member enters a value for a measure with no reading yet
+- **THEN** the latest reading shows that value, who reported it and when, and opening history includes it
 
 ### Requirement: Workspace Requests tab
 

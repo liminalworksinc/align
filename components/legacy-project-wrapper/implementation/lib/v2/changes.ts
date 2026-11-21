@@ -1,3 +1,4 @@
+import { expectationInput, expectationView, recordExpectation, recordOutcome } from "./expectations";
 import { all, audit, get, run, tx } from "./db";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
@@ -510,12 +511,14 @@ export function changeRequestDecision(pp: PolicyPrincipal, goalId: string, id: s
     };
     /** Publish the approved content as the goal's next version (authored by the approver) with its directives. */
     const launch = (content: GoalContent, approvedBy: string) => {
+      const expectation = expectationInput(b.expectation, content.measures, at);
       // Launched first, so the new version's supersede-before-launch step leaves this request alone.
       run("UPDATE v2_change_requests SET launch = 'launched', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
       const written = writeGoalVersion(g, content, me, at, approvedBy);
       run("UPDATE v2_change_requests SET version = ? WHERE id = ?", written.version, r.id);
       audit(pp.wsId, me, "change_request.launched", r.id, at);
       event("first_launch", { ws: pp.wsId, user: me, at });
+      if (expectation) recordExpectation(pp, written, r.id, expectation, at);
     };
     switch (action) {
       case "approve": {
@@ -840,6 +843,8 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     launch_decided_by: person(r.launch_by),
     launch_decided_at: r.launch_at,
     condition,
+    launch_measures: can.launch || can.approve_and_launch ? after.measures : [],
+    expectation: r.launch === "launched" ? expectationView(pp, g, r.id) : null,
     /** Links on the current revision (the one an approval decides). */
     evidence_count: evidence.filter((e) => e.revision === r.revision).length,
     /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
@@ -907,6 +912,15 @@ export function changeRequestGroups(pp: PolicyPrincipal, state?: string | null) 
  *  can't read its goal, or when `goalId` is named and the request is on another goal. */
 export function getChangeRequest(pp: PolicyPrincipal, id: string, goalId?: string): ChangeRequestView {
   return requestView(pp, visibleRequest(pp, id, goalId));
+}
+
+export async function reportChangeOutcome(pp: PolicyPrincipal, goalId: string, id: string, b: Body) {
+  return tx(() => {
+    const reader = memberPrincipal(pp.wsId, pp.userId);
+    const r = visibleRequest(reader, id, goalId);
+    recordOutcome(reader, goalRow(pp.wsId, r.goal_id)!, id, b, nowIso());
+    return requestView(reader, r);
+  });
 }
 
 export function assertChangeRequestAction(a: string): ChangeRequestAction {

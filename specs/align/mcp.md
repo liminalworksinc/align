@@ -303,6 +303,18 @@ The MCP server SHALL return from `align_get_goal` (input `goal_id`, at most 64 c
 - **WHEN** the person calls `align_get_goal` with the id of a team goal of a team they are not in, and they are not a workspace owner
 - **THEN** the call fails with `Goal not found`, the same as for an id that does not exist
 
+### Requirement: MCP goal and brief reads include self-reported readings
+
+`align_get_goal` and `align_get_brief` SHALL include `latest_reading` with each measure in their MCP projection:
+`{value, source, observed_at}`, with `value` marked as untrusted text and `source` set to `self`, or null
+when there is no reading. Readings follow the measure id. The requested launched version still determines which
+measures are included. Readings SHALL remain outside the goal feed, agent envelope and directives.
+
+#### Scenario: A reading on a measure in two versions
+
+- **WHEN** a measure kept its id between launched versions and a member records a reading
+- **THEN** the measure in either version can carry the latest reading, and an unlaunched measure does not appear
+
 ### Requirement: align_list_change_requests output
 
 The MCP server SHALL return from `align_list_change_requests` (optional `state`: one of `pending`, `countered`, `approved`, `rejected`, `withdrawn`, `superseded`) the fields `workspace` (`{id, name}`), `state` (the filter or `null`) and `change_requests`: the change requests on goals the person can read, filtered by `state` when given, newest `updated_at` first, at most 100. Each SHALL carry `id`, `goal` (`{id, title}`), `state`, `launch`, `requested_by` (`{id, name}`), `base_version`, `revision`, `reason`, `condition`, `evidence`, `snapshot`, `created_at` and `updated_at`. `condition` SHALL be the request's "Accept if…" condition `{revision, text, acknowledged_by, acknowledged_at}` (`text` as `untrusted_text`; `acknowledged_by` `{id, name}` and `acknowledged_at` once the requester acknowledged it, else both `null`) or `null`, and the text summary SHALL show it as `not confirmed yet` until it is acknowledged; nothing calls it verified. `evidence` SHALL list every link on every revision, oldest revision first, each `{id, revision, kind, url, label, source, reported_as, added_by:{id, name}, added_at}` with `reported_as` `self-reported` or `agent-reported`; `snapshot` SHALL be the Align snapshot of the current revision (`{revision, recorded_by: "align", recorded_at, window, spend, spend_hidden, bound_sessions, last_activity_at}`, `spend` `null` when the person may not read spend) or `null`. The text summary SHALL show each link with its kind, how it was reported and who added it, and the snapshot as `Recorded by Align at revision <n>`. It SHALL say each state in the app's words, `declined` for a `rejected` request (the `state` field and the filter value stay `rejected`), so the summary of `state: "rejected"` opens `<n> change requests (declined).` and lists `- <id> declined on goal …`, never "rejected" (`scripts/test-v2.mjs` "c9 W2: ..."); the person the token acts for is `you` in every summary line (who asked, who added a link, who acknowledged a condition, who decided). Any other `state` value SHALL fail input validation.
@@ -320,6 +332,17 @@ The MCP server SHALL return from `align_list_change_requests` (optional `state`:
 ### Requirement: align_get_decision_record output
 
 The MCP server SHALL return from `align_get_decision_record` (input `change_request_id`, at most 64 characters) the fields `found`, `decided` and `record`. A request that does not exist or is on a goal the person cannot read SHALL give `found: false`, `decided: false`, `record: null` and the text `No change request <id>.` A request that is `pending` or `countered` SHALL give `found: true`, `decided: false`, `record: null` and the text `Change request <id> is <state>; it has no decision yet.` A request that is `withdrawn`, or `superseded` without an approval, SHALL give `found: true`, `decided: false`, `record: null` and the text `Change request <id> was <state> without a decision.` A decided request (`approved` or `rejected`, or `superseded` after its approval: the decision records of the `goals-and-proposals` part) SHALL give `found: true`, `decided: true` and a `record` with `id`, `goal` (`{id, title}`), `state`, `launch`, `requested_by` (`{id, name}`), `decided_by` (`{id, name}` of the approver or rejecter), `reason` (the requester's), `decision_note` (the approval note or the rejection reason, or `null`), `base_version`, `diff` (the before and after value of each changed field among `title`, `measures`, `depends_on` and `status`, as `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests/{id}` returns it), `resulting_version` (the goal version the launch created, or `null` before a launch), `launch_decided_by` and `launch_decided_at` (the latest launch or not yet, or `null`), `condition` (as in `align_list_change_requests`), `evidence` and `snapshot` (as in `align_list_change_requests`, the snapshot being the decided revision's), `approved_without_evidence` (`true` or `false` when approved, `null` when rejected) and `decided_at`. The text summary SHALL open with `Change request <id> on goal <id> <title> was <decision> by <name> at <time>.` (`by you` when the person the token acts for decided it), the decision in the app's words (`approved`, `declined` for a `rejected` request, never `rejected`, or `superseded`), SHALL say `Approved without evidence.` when that is so, the launch wording of "MCP goal reads show the launched version only", `Superseded before launch: it never reached agents.` for a request superseded after its approval, and the condition with `not confirmed yet` or who acknowledged it and when, and SHALL say each change in words, one line each, the same lines as the web app's decision value card (`<measure> target 500 -> 600`, `Added measure …`, `Removed measure …`, `Title … -> …`, `Status … -> …`, `Added limit …`, `Now depends on <id>`, and for dependencies the person cannot read, counted after the named ones, `Now depends on <id> and 1 other goal you can't see`), never only a count (`Measures: 1 -> 1`) and never leaving a hidden dependency out; the record's `diff.depends_on` SHALL carry `hidden` `{before, after}`, the number of dependencies on each side the person cannot read (left out of `before` and `after`), or `null`.
+
+A decided record SHALL include `expectation` or null. The expectation SHALL include the launched version, measure
+id and launch-time text, expected value, due date, optional evidence text, assignee, time and latest `outcome`.
+The outcome SHALL carry its choice, reporter, time, optional note and evidence URL, or be null while unanswered.
+The summary SHALL label the expectation and outcome self-reported and distinguish an unanswered expectation from
+a report of "can't tell". People's text SHALL use the usual untrusted-text marking.
+
+#### Scenario: An outcome through MCP
+
+- **WHEN** a request reader calls `align_get_decision_record` before and after the launcher reports `cant_tell`
+- **THEN** the first record has a null outcome and the second has a self-reported outcome of `cant_tell`
 
 #### Scenario: A target change in words
 

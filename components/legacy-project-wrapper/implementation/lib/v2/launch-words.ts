@@ -13,3 +13,5 @@ export function launchWords(launch: LaunchWord | null, baseVersion: number, vers
   if (launch === "superseded") return "Superseded before launch: it never reached agents.";
   return null;
 }
+
+export const OUTCOME_WORDS = { met: "met", not_met: "not met", cant_tell: "can't tell" } as const;

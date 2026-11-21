@@ -42,19 +42,24 @@ export interface EvidenceRow {
  *  with no user name or password (stored as parsed), label 1 to 120 characters. 400 otherwise. */
 export function evidenceInput(b: Body): { kind: EvidenceKind; url: string; label: string } {
   const kind = oneOf(b, "kind", EVIDENCE_KINDS);
-  const raw = str(b, "url", URL_MAX);
+  const url = httpsEvidenceUrl(b, "url");
+  const label = str(b, "label", LABEL_MAX);
+  if (/[\u0000-\u001f\u007f]/.test(label)) throw badRequest("label must be one line of text");
+  return { kind, url, label };
+}
+
+export function httpsEvidenceUrl(b: Body, field: string): string {
+  const raw = str(b, field, URL_MAX);
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
-    throw badRequest("url must be an https URL");
+    throw badRequest(`${field} must be an https URL`);
   }
-  if (u.protocol !== "https:" || !u.hostname) throw badRequest("url must be an https URL");
-  if (u.username || u.password) throw badRequest("url must not contain a user name or password");
-  if (u.href.length > URL_MAX) throw badRequest(`url is too long (max ${URL_MAX} characters)`);
-  const label = str(b, "label", LABEL_MAX);
-  if (/[\u0000-\u001f\u007f]/.test(label)) throw badRequest("label must be one line of text");
-  return { kind, url: u.href, label };
+  if (u.protocol !== "https:" || !u.hostname) throw badRequest(`${field} must be an https URL`);
+  if (u.username || u.password) throw badRequest(`${field} must not contain a user name or password`);
+  if (u.href.length > URL_MAX) throw badRequest(`${field} is too long (max ${URL_MAX} characters)`);
+  return u.href;
 }
 
 export const evidenceRows = (requestId: string) => all<EvidenceRow>("SELECT * FROM v2_change_request_evidence WHERE change_request_id = ? ORDER BY revision, added_at, id", requestId);

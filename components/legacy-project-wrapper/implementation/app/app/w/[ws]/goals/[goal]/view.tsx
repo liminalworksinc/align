@@ -11,6 +11,8 @@ import { dependsOnFull } from "@/lib/v2/change-words.mts";
 import { GoalLimits, useStashedLimits } from "../../../../_ui/limits";
 import { GoalActivityCard } from "../../../../_ui/activity";
 import { AgentsOnGoalCard, HoldBanner, type HoldState } from "../../../../_ui/requests";
+import { MeasureReadings } from "../../../../_ui/measure-readings";
+import type { MeasureReading } from "@/lib/v2/readings";
 import type { ChangeRequest, Goal, MySession } from "../../../../_ui/types";
 
 interface Detail {
@@ -18,6 +20,8 @@ interface Detail {
   versions: { version: number; title: string; status: string; target_share: number | null; content_hash: string; created_at: string }[];
   contributions: { goal: { id: string; title: string } | null }[];
   can_edit: boolean;
+  measure_readings: Record<string, MeasureReading | null>;
+  can_record_readings: boolean;
   /** The server's answer to "may this reader propose a change?" (not the owner, not a viewer, an active goal). */
   can_propose: boolean;
   /** How many dependencies the reader can't see (never which); a new version keeps them. */
@@ -468,9 +472,11 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             {g.measures.length === 0 && <Note>No measures.</Note>}
             <ul className="list-disc pl-5 text-[15px]">
               {g.measures.map((m) => (
-                <li key={m.id}>
+                <li key={m.id} className="mb-3 min-w-0 [overflow-wrap:anywhere]">
                   {m.text}
                   {m.target && <span className="text-zinc-500"> (target: {m.target})</span>}
+                  <MeasureReadings ws={ws} goal={g.id} measure={m.id} me={me.id} latest={d.error ? undefined : d.data!.measure_readings[m.id]}
+                    canRecord={!d.error && d.data!.can_record_readings} onDone={d.reload} />
                 </li>
               ))}
             </ul>

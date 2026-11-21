@@ -1423,6 +1423,55 @@ const MIGRATIONS: string[] = [
     'hand', 'folder_rule', 'anchor_hint', 'alignment', 'switch_request', 'past_import', 'suggested_agent', 'suggested_model'
   ));
   `,
+  // Migration 28: launch expectations, outcome history, and readings kept outside goal content.
+  `
+  CREATE TABLE v2_expectations (
+    change_request_id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    goal_version INTEGER NOT NULL,
+    measure_id TEXT NOT NULL,
+    measure_text TEXT NOT NULL,
+    expected TEXT NOT NULL,
+    due_on TEXT NOT NULL,
+    evidence TEXT,
+    assignee_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (ws_id, change_request_id),
+    FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (goal_id, goal_version) REFERENCES v2_goal_versions(goal_id, version) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_expectations_due ON v2_expectations(ws_id, assignee_id, due_on);
+  CREATE TABLE v2_outcome_reports (
+    ws_id TEXT NOT NULL,
+    change_request_id TEXT NOT NULL,
+    answer INTEGER NOT NULL CHECK (answer IN (1, 2)),
+    outcome TEXT NOT NULL CHECK (outcome IN ('met', 'not_met', 'cant_tell')),
+    note TEXT,
+    evidence_url TEXT,
+    reported_by TEXT NOT NULL,
+    reported_at TEXT NOT NULL,
+    PRIMARY KEY (change_request_id, answer),
+    FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_expectations(ws_id, change_request_id) ON DELETE CASCADE
+  );
+  CREATE TABLE v2_measure_readings (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    measure_id TEXT NOT NULL,
+    value_text TEXT NOT NULL,
+    value_num REAL,
+    source TEXT NOT NULL CHECK (source = 'self'),
+    observed_at TEXT NOT NULL,
+    recorded_by TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_measure_readings_history
+    ON v2_measure_readings(ws_id, goal_id, measure_id, observed_at DESC, recorded_at DESC);
+  CREATE UNIQUE INDEX v2_events_once_expectations_readings ON v2_events(name, ws_id)
+    WHERE ws_id IS NOT NULL AND name IN ('first_expectation', 'first_reading');
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
