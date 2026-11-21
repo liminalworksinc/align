@@ -41,7 +41,7 @@ async function decisionStandIn(t: TestContext) {
     const confidence = outcome === "no-fit" ? 0.1 : 0.95;
     const answers = Array.isArray(body.questions)
       ? [{ name: "fit", type: "predicate", probability: confidence }, {
-        ...goal, name: "goal", type: outcome === "refusal" ? "refusal" : "choice",
+        ...goal, name: "goal", type: outcome === "refusal" ? "refusal" : outcome === "wrong-type" ? "predicate" : "choice",
         probabilities: Object.entries(scores).map(([value, probability]) => ({ value, probability })),
       }]
       : { fit: { noul: confidence }, goal };
@@ -222,7 +222,7 @@ test("the three vendor wire formats use the same fit, choice and abstention rule
     assert.deepEqual(JSON.parse(body.input ?? body.state), input);
     assert.equal(provider === "google" ? headers["x-goog-api-key"] : headers.authorization, provider === "google" ? KEY : `Bearer ${KEY}`);
   }
-  for (const failure of ["tie", "no-fit", "unknown", "refusal", "redirect", "timeout", "array", "object", "number"]) {
+  for (const failure of ["tie", "no-fit", "unknown", "refusal", "wrong-type", "redirect", "timeout", "array", "object", "number"]) {
     service.set(failure);
     assert.equal(await decideGoal({ provider: "openai" }, KEY, input, 75, send), null, failure);
   }
@@ -411,6 +411,29 @@ test("a restriction saved while eligible goals are loading prevents dispatch", a
   w.fake.blockedModelWorkspaces.add("ws_acme");
   release();
   await work;
+  assert.equal(service.requests.length, 0);
+  assert.deepEqual(w.inspect(sid).suggestions, []);
+});
+
+test("a held goal suggestion grant cannot dispatch after its send window expires", async (t) => {
+  const w = await setup(t);
+  const service = await decisionStandIn(t);
+  await w.enableDecision(service.url);
+  const sid = randomUUID();
+  w.start(sid);
+  w.turn(sid);
+  ingestSpool(w.ctx);
+  let held = false;
+  w.fake.beforeReply = async (_, url, status, answer) => {
+    if (url.endsWith("/data-sharing") && status === 200 && answer?.enabled) {
+      held = true;
+      answer.send_for_ms = 60;
+      w.fake.blockedModelWorkspaces.add("ws_acme");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+  await runAnalysis(w.ctx);
+  assert.equal(held, true);
   assert.equal(service.requests.length, 0);
   assert.deepEqual(w.inspect(sid).suggestions, []);
 });

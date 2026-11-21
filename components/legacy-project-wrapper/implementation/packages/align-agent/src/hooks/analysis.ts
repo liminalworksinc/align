@@ -92,6 +92,8 @@ export function takeAnalysisNotice(home: string, lid: string, inj: InjectedState
   return [
     `Align: work may have crossed a limit on "${clean(first.title, 80)}" (version ${first.version}).`,
     ...detail,
+    ...(selected.some((group) => group.some((finding) => finding.evidence === "model"))
+      ? [`See the final reply on this machine with align analysis show ${lid.slice(0, 8)}.`] : []),
     "Type \`::align drift wrong\` to mark this notice as a false alarm, or add a limit id to mark one. \`align config drift off\` turns off these notices.",
   ].join("\n");
 }

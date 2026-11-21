@@ -57,6 +57,12 @@ provider's account id. It reads no other data from either service.
 - **Analytics.** Align uses no third-party analytics, tracking or advertising service. Its product funnel events are
   counted in its own database.
 
+## Proposed model limit checks
+
+Align does not provide a default model recipient. The workspace owner sets the service address. Before enabling checks, a machine
+owner sees the address and what it will receive. A new address revision requires fresh consent. The CLI sends the limited input directly under the agreement covering that endpoint.
+Any recipient that processes data on Align's behalf must be approved, added to this list and disclosed before use.
+
 ## Every external host the hosted server can call
 
 | Host | Who | Why |

@@ -2,7 +2,7 @@ import path from "node:path";
 import { api, loadCredentials, signedIn, stillBound } from "./api.ts";
 import type { Ctx } from "./context.ts";
 import { kvGet, kvSet } from "./db.ts";
-import { DECISION_PROVIDERS, decideGoal, decisionService, type DecisionService } from "./decision-model.ts";
+import { DECISION_PROVIDERS, decideGoal, decisionService, decisionWindow, decisionWindowStart, sameDecisionService, type DecisionService } from "./decision-model.ts";
 import { loadFeed, loadMe, resolveWorkspace } from "./goals.ts";
 import { getShare } from "./hot.ts";
 import { pastSessions } from "./share.ts";
@@ -31,13 +31,8 @@ export function saveSuggestionConsent(ctx: Ctx, recipient: Recipient, ws: string
   const device = loadCredentials(ctx.home)?.device_id;
   if (enabled && (!device || !signedIn(ctx.home))) throw new Error("Sign in on this machine before enabling model suggestions.");
   const current = suggestionConsent(ctx, recipient, ws);
-  if (enabled && current && sameService(current.service, service)) return;
+  if (enabled && current && sameDecisionService(current.service, service)) return;
   kvSet(ctx.db, modelKey(recipient, ws), JSON.stringify(enabled && device ? { device, at: new Date().toISOString(), service } : null));
-}
-
-function sameService(a?: DecisionService | null, b?: DecisionService | null) {
-  if (a?.provider !== b?.provider) return false;
-  return a?.provider !== "workspace" || (b?.provider === "workspace" && a.endpoint === b.endpoint && a.revision === b.revision);
 }
 
 export function recordSuggestionReply(ctx: Ctx, entry: Extract<SpoolRecord, { type: "suggestion_reply" }>): void {
@@ -185,6 +180,7 @@ export async function considerGoalSuggestion(ctx: Ctx, lid: string, turn: Analys
 }
 
 const MODEL_POLICY_MS = 750;
+const MODEL_REQUEST_MS = 2200;
 
 async function modelSuggestion(ctx: Ctx, ws: string, git: GitInfo | null, turn: AnalysisTurn, prompt: string | undefined,
   canUse: (cap: AnalysisExtension, workspace: string, at: string) => boolean, stillPrivate: () => boolean) {
@@ -199,7 +195,7 @@ async function modelSuggestion(ctx: Ctx, ws: string, git: GitInfo | null, turn: 
 
   const current = () => {
     const latest = suggestionConsent(ctx, cap.recipient, ws);
-    return latest?.at === consent.at && latest.device === consent.device && sameService(latest.service, service)
+    return latest?.at === consent.at && latest.device === consent.device && sameDecisionService(latest.service, service)
       && stillBound(ctx) && stillPrivate();
   };
   const url = `/api/v2/workspaces/${encodeURIComponent(ws)}`;
@@ -209,21 +205,22 @@ async function modelSuggestion(ctx: Ctx, ws: string, git: GitInfo | null, turn: 
   if (!active.length || active.length > 254) return null;
   const goals = active.map(({ id, title }) => ({ id, title }));
 
-  const policyStart = performance.now();
-  const policy = await api(ctx, "GET", `${url}/data-sharing?for=model-suggestion`, { timeoutMs: MODEL_POLICY_MS });
+  const remaining = decisionWindowStart();
+  const policy = await api(ctx, "GET", `${url}/data-sharing?for=model-suggestion`, { timeoutMs: MODEL_POLICY_MS, redirect: "error" });
+  const duration = decisionWindow(policy, MODEL_POLICY_MS + MODEL_REQUEST_MS);
   const blocked = policy.json?.blocked;
-  if (policy.status !== 200 || !Array.isArray(blocked)
+  if (!duration || !Array.isArray(blocked)
     || !blocked.every((tier: unknown) => tier === 1 || tier === 2 || tier === 3 || tier === 4) || blocked.includes(3)) return null;
   if (service.provider === "workspace") {
-    if (!sameService(service, decisionService("workspace", policy.json?.decision_service))) return null;
+    if (!sameDecisionService(service, decisionService("workspace", policy.json?.decision_service))) return null;
   }
 
   const repoAlias = ctx.db.prepare("SELECT alias FROM repo_aliases WHERE workspace_id=? AND repo_root=?")
     .get(ws, git?.toplevel ?? turn.cwd)?.alias as string | undefined;
-  if (!current() || performance.now() - policyStart >= MODEL_POLICY_MS) return null;
+
   const goal = await decideGoal(service, key, {
     first_prompt: prompt, ...(git?.branch ? { branch: git.branch } : {}), repo_alias: repoAlias ?? null, goals,
-  }, 2200);
+  }, MODEL_REQUEST_MS, fetch, () => current() && remaining(MODEL_POLICY_MS) > 0 ? remaining(duration) : 0);
   const anchors = git ? matchAnchors(active, git) : [];
   if (!goal || !current() || (anchors.length && !anchors.some(({ id }) => id === goal))) return null;
   return { goal, origin: "suggested_model" as const };

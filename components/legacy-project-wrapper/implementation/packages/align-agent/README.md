@@ -340,6 +340,33 @@ agent time outside shared sessions, by folder, and the week its note was shown; 
 Set `"default_workspace": "<ws id>"` in `config.json` if you belong to several workspaces and want `::align share`
 without `--dir`; `align config` shows it. Otherwise the default is the only workspace this device reaches, or none.
 
+## Proposed model limit checks
+
+The CLI checks completed turns after sync when this machine has opted in and the workspace permits it. The
+workspace owner sets the decision service address in People. Use HTTPS, or HTTP on loopback in Mode L. Set
+`ALIGN_DECISION_WORKSPACE_KEY` in the environment that runs sync.
+
+Run `align data-sharing model preview` and use the printed command to allow that recipient on this pairing
+for the chosen workspace. Run the preview again if the workspace address changes. This choice and its workspace
+block are independent of goal suggestions.
+The recipient gets the last assistant reply up to 2,000 UTF-8 bytes, selected limit wording and types, and fixed
+questions. Use `align analysis show <session>` to read the evidence for a finding, or mark a notice wrong with
+`::align drift wrong`. `align data-sharing model off` stops requests. Sharing a finding with Align also requires
+`align data-sharing results on`, a local Align server, and workspace permission.
+
+## Proposed deliberate excerpts
+
+1. Run `align data-sharing excerpts on` and `align excerpt readers <session>`.
+2. Use `align analysis show <session> --json` to find the completed turn's `root`. Copy the exact portion of one prompt
+   or reply into a text file. Match the original line breaks, including whether the selection ends with a newline.
+3. Run `align excerpt preview <session> --turn <root> --file <path> --reader <id> --purpose "<purpose>" --hours <n>`.
+   Repeat `--reader` to name up to five people. Choose 1 to 168 whole hours.
+4. Review the text and audience. Within ten minutes repeat the command with `share` in place of `preview` and add
+   `--confirm <code>` using the preview's code. The expiry starts when Align accepts the share.
+
+The sharer and the named readers can open the excerpt in the workspace's Sessions page. The sharer can revoke it
+there. `align data-sharing excerpts off` stops new uploads.
+
 ## Privacy rules in code
 
 - Hooks read only local state, never the network or credentials, and exit within 300 ms. The one transcript read is

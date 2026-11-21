@@ -1,4 +1,5 @@
 import { eventActor, purgeWorkspace, RESTORE_DAYS, sessionMaxDays, testIdpEnabled, type Sql } from "./core.mts";
+import { deleteExpiredExcerpts } from "./excerpt-retention.mts";
 
 // The retention schedule (docs/RETENTION.md): one idempotent job, runRetention(db, tx, now), run by the server at every
 // start and every 24 hours (lib/v2/retention.ts, instrumentation.ts), and by the operator with
@@ -231,6 +232,7 @@ export interface RetentionCounts {
   sign_in_sessions_deleted: number;
   activity_deleted: number;
   analysis_findings_deleted: number;
+  session_excerpts_deleted: number;
   invites_deleted: number;
   access_requests_deleted: number;
   events_deleted: number;
@@ -307,6 +309,7 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, o: StepOptions) => void)[
       const findingsCutoff = daysBefore(now, 30);
       c.analysis_findings_deleted += db.run("DELETE FROM v2_analysis_findings WHERE turn_started_at <= ? OR received_at <= ?", findingsCutoff, findingsCutoff);
     }
+    if (tableExists(db, "v2_session_excerpts")) c.session_excerpts_deleted += deleteExpiredExcerpts(db, at);
     c.activity_deleted += db.run("DELETE FROM v2_activity WHERE expires_at < ?", at);
     c.invites_deleted += db.run("DELETE FROM v2_invites WHERE accepted_at IS NULL AND expires_at < ?", daysBefore(now, INVITE_GRACE_DAYS));
   },
@@ -365,6 +368,7 @@ export async function runRetention(
     sign_in_sessions_deleted: 0,
     activity_deleted: 0,
     analysis_findings_deleted: 0,
+    session_excerpts_deleted: 0,
     invites_deleted: 0,
     access_requests_deleted: 0,
     events_deleted: 0,
