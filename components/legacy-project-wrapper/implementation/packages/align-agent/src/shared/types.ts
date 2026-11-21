@@ -300,6 +300,7 @@ export interface FeedFile {
   etag: string | null;
   fetched_at: string;
   goals: Goal[];
+  due_expectations?: { goal_id: string; measure_id: string; measure_text?: string; due_on: string }[];
   /** The workspace's steering switch (absent from older servers, which means off). */
   steering?: "off" | "on";
 }

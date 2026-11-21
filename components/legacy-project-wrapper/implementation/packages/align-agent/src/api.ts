@@ -135,14 +135,20 @@ function failureWords(e: unknown, timeoutMs: number): string {
   return code || err?.cause?.message || err?.message || "fetch failed";
 }
 
-export async function rawRequest(base: string, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<Resp> {
+type RequestOptions = { body?: unknown; headers?: Record<string, string>; timeoutMs?: number; pairedOrigin?: string };
+
+export async function rawRequest(base: string, method: string, path: string, opts: RequestOptions = {}): Promise<Resp> {
   let res: Response;
   const server = base.replace(/\/$/, "");
+  const url = server + path;
+  if (opts.pairedOrigin && new URL(url).origin !== opts.pairedOrigin)
+    throw new Error("This request must go to the server where this machine is signed in.");
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   const t0 = Date.now();
   try {
-    res = await fetch(server + path, {
+    res = await fetch(url, {
       method,
+      redirect: opts.pairedOrigin ? "manual" : undefined,
       headers: { ...(opts.body !== undefined ? { "content-type": "application/json" } : {}), accept: "application/json", ...(opts.headers || {}) },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
@@ -151,6 +157,10 @@ export async function rawRequest(base: string, method: string, path: string, opt
     const msg = `could not reach the Align server at ${server} (${failureWords(e, timeoutMs)})`;
     trouble ??= msg;
     throw new NetworkError(msg);
+  }
+  if (opts.pairedOrigin && ((res.status >= 300 && res.status < 400) || res.redirected || new URL(res.url).origin !== opts.pairedOrigin)) {
+    await res.body?.cancel();
+    throw new Error("The paired server redirected this request. Check the server address before trying again.");
   }
   if (res.status >= 500) trouble ??= `the Align server at ${server} answered HTTP ${res.status}`;
   // The Date header has whole seconds: the server's time lies within the second it names, read at mid-request.
@@ -368,7 +378,7 @@ async function noteClock(ctx: Ctx, measured: number | null): Promise<void> {
 }
 
 /** Refresh the access token if it is missing or within 2 minutes of expiry (or `force`). */
-export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credentials> {
+export async function refreshIfNeeded(ctx: Ctx, force = false, pairedOrigin?: string): Promise<Credentials> {
   const initial = loadCredentials(ctx.home);
   checkBound(ctx, initial);
   if (!initial || initial.signed_out || !initial.refresh_token) throw new SignedOut("not signed in");
@@ -393,7 +403,7 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
       sentTs = Math.max(Date.now() + offset, after + 1);
       const ts = new Date(sentTs).toISOString();
       const sig = key.sign(refreshMessage(c.device_id, c.refresh_token!, ts));
-      return rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
+      return rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { pairedOrigin, body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
     };
     let offset = Number(c.clock_offset_ms) || 0;
     // An answer lost in transit (no answer, or a 200 whose body did not arrive) may have rotated the token on the server:
@@ -462,12 +472,12 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
 }
 
 /** Authenticated device request. Retries once after a forced refresh on 401; a second 401 signs the device out. */
-export async function api(ctx: Ctx, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<Resp> {
-  let c = await refreshIfNeeded(ctx);
+export async function api(ctx: Ctx, method: string, path: string, opts: RequestOptions = {}): Promise<Resp> {
+  let c = await refreshIfNeeded(ctx, false, opts.pairedOrigin);
   let r = await rawRequest(c.server_url, method, path, { ...opts, headers: { ...(opts.headers || {}), authorization: `Bearer ${c.access_token}` } });
   await noteClock(ctx, r.clockOffsetMs);
   if (r.status === 401) {
-    c = await refreshIfNeeded(ctx, true);
+    c = await refreshIfNeeded(ctx, true, opts.pairedOrigin);
     r = await rawRequest(c.server_url, method, path, { ...opts, headers: { ...(opts.headers || {}), authorization: `Bearer ${c.access_token}` } });
     if (r.status === 401) {
       // A new pairing committed meanwhile (`align login`): this answer was for the device it replaced.
@@ -479,7 +489,7 @@ export async function api(ctx: Ctx, method: string, path: string, opts: { body?:
   return r;
 }
 
-export async function apiOk(ctx: Ctx, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string> } = {}): Promise<any> {
+export async function apiOk(ctx: Ctx, method: string, path: string, opts: RequestOptions = {}): Promise<any> {
   const r = await api(ctx, method, path, opts);
   if (r.status >= 200 && r.status < 300) return r.json;
   throw new HttpError(r.status, r.json?.error ?? null, r.json);

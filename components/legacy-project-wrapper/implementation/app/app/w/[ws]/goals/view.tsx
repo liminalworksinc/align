@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../../_ui/kit";
-import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../_ui/goalform";
+import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, hasUnlabelledSource, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../_ui/goalform";
 import { LimitChips, NotesSuggest } from "../../../_ui/limits";
 import type { Me } from "../../../_ui/server";
 import type { Goal, WsDetail } from "../../../_ui/types";
@@ -25,6 +25,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
   const [visibility, setVisibility] = useState<Goal["visibility"]>("workspace");
   const [team, setTeam] = useState("");
   const [measures, setMeasures] = useState(measuresDraft());
+  const [showMeasureLabelErrors, setShowMeasureLabelErrors] = useState(false);
   const [anchors, setAnchors] = useState(anchorsDraft());
   const [limits, setLimits] = useState<LimitDraft[]>([]);
   const [target, setTarget] = useState("");
@@ -106,6 +107,10 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (hasUnlabelledSource(measures)) {
+                setShowMeasureLabelErrors(true);
+                return;
+              }
               // The workspace's first active goal gets "Connect one agent" as its next step (founder ruling, PR 68 pass 1 item 7).
               // Unknown until the goals are read: then it is not called the first (PR 68 audit Low 4).
               const firstGoal = !!feed.data && !feed.data.goals.some((g) => g.status === "active");
@@ -114,14 +119,15 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                 async () => {
                   const g = await api<{ id: string }>(`/api/v2/workspaces/${ws}/goals`, {
                     body: company
-                      ? { title, level: "company", visibility: "workspace", measures: measuresOut(measures), anchors: anchorsOut(anchors), limits: limitsOut(limits), target_share: targetOut(target) }
-                      : { title, level: "team", visibility, team_id: team || null, measures: measuresOut(measures), anchors: anchorsOut(anchors), limits: limitsOut(limits), target_share: targetOut(target) },
+                      ? { title, level: "company", visibility: "workspace", measures: measuresOut(measures, true), anchors: anchorsOut(anchors), limits: limitsOut(limits), target_share: targetOut(target) }
+                      : { title, level: "team", visibility, team_id: team || null, measures: measuresOut(measures, true), anchors: anchorsOut(anchors), limits: limitsOut(limits), target_share: targetOut(target) },
                   });
                   setCreated({ id: g.id, title: sentTitle, first: firstGoal });
                 },
                 () => {
                   setTitle("");
                   setMeasures(measuresDraft());
+                  setShowMeasureLabelErrors(false);
                   setAnchors(anchorsDraft());
                   setLimits([]);
                   setTarget("");
@@ -133,7 +139,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
             <Field label="Goal">
               <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required autoFocus={first} />
             </Field>
-            <MeasuresEditor value={measures} onChange={setMeasures} keepOne />
+            <MeasuresEditor value={measures} onChange={setMeasures} configureSource showLabelErrors={showMeasureLabelErrors} keepOne />
             <LimitEditor value={limits} onChange={setLimits} />
             {owner && (
               <Field label="Level" hint="Only workspace owners create company goals. A company goal has no team and everyone in the workspace sees it.">

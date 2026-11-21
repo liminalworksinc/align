@@ -30,6 +30,7 @@ import {
   renderContextDelta,
   renderDelta,
   renderEnvelope,
+  quoted,
   boundContextNote,
   siblingChangeNote,
   requestAnswerLine,
@@ -538,6 +539,19 @@ function autoAccept(home: string, lid: string, hot: HotState | null): void {
   if (changed) writeInjected(home, lid, inj);
 }
 
+function dueExpectationNote(home: string, ws: string, goalId: string): string | null {
+  const feed = readJson<FeedFile>(layout.feed(home, ws));
+  const goal = feed?.goals.find((g) => g.id === goalId && g.status === "active");
+  const due = feed?.due_expectations?.filter((e) => e.goal_id === goalId && /^\d{4}-\d{2}-\d{2}$/.test(e.due_on));
+  if (!goal || !due?.length) return null;
+  const items = due.slice(0, 3).map((e) => {
+    const label = e.measure_text ?? goal.measures.find((m) => m.id === e.measure_id)?.text;
+    return `${label ? quoted(label, 40) : "Measure from an earlier version"}, due ${e.due_on}`;
+  });
+  if (due.length > 3) items.push(`${due.length - 3} more in Align`);
+  return `[Align] Outcomes due for this goal. ${items.join(". ")}.`;
+}
+
 // ---------- SessionStart ----------
 export function sessionStartUncounted(home: string, harness: Harness, input: HookInput, env: NodeJS.ProcessEnv): HookOutput {
   const sid = input.session_id;
@@ -578,6 +592,8 @@ export function sessionStartUncounted(home: string, harness: Harness, input: Hoo
       inj.context_epoch++;
       reportApplied(home, lid, inj, hot.pending_directives);
     }
+    const due = dueExpectationNote(home, hot.share.workspace_id, hot.goal.id);
+    if (due) context = context ? `${context}\n${due}` : due;
     const card = cardFor(home, lid, hot.goal.id, inj, cwd, hot.share.workspace_id);
     if (card) context = context ? `${context}\n${card}` : card;
     const steer = steerOnce(home, lid, source, hot.share.workspace_id, hot.goal.id, inj);
@@ -589,6 +605,8 @@ export function sessionStartUncounted(home: string, harness: Harness, input: Hoo
       const related = contextGoals(home, rule!.workspace_id, goal.id);
       const ta = teamAsks(home, rule!.workspace_id, goal.id);
       context = renderEnvelope(goal, related, ta);
+      const due = dueExpectationNote(home, rule!.workspace_id, goal.id);
+      if (due) context = `${context}\n${due}`;
       markInjected(inj, goal, "shared");
       // The share this envelope is about: the one the sync makes from this rule, with the epoch chosen here. It may
       // only take effect after this session's prompts (`claude -p`), so no later hook call can record it (cycle 7).

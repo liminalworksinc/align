@@ -1,3 +1,5 @@
+import { readableDueExpectations } from "./expectations";
+import { commandReader, parseMeasureSource, type MeasureSource } from "./measure-sources";
 import { all, audit, get, run, tx } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, sha256hex } from "./ids";
@@ -44,7 +46,11 @@ export interface Measure {
   id: string;
   text: string;
   target: string | null;
+  source?: MeasureSource;
 }
+export const publicMeasures = (measures: Measure[]): Measure[] =>
+  measures.map(({ id, text, target }) => ({ id, text, target }));
+
 export interface Anchors {
   repos: string[];
   branch_patterns: string[];
@@ -122,7 +128,7 @@ export function goalCore(g: GoalRow): GoalCore {
     id: g.id,
     version: g.version,
     title: g.title,
-    measures: JSON.parse(g.measures_json),
+    measures: publicMeasures(JSON.parse(g.measures_json) as Measure[]),
     status: g.status,
     level: g.level ?? "team",
     visibility: toWireVisibility(g.visibility),
@@ -225,17 +231,19 @@ export function visibleGoals(pp: PolicyPrincipal): GoalRow[] {
 /** The goals feed: the visible set with `bindable` and each active goal's trailing-7-day allocation (whole percents,
  *  lib/v2/allocation.ts), the workspace's steering switch, and a short version hash of both for ETag / If-None-Match.
  *  Shares are whole percents, so usage moves the hash only when a share moves a full point. */
-export function goalsFeed(pp: PolicyPrincipal) {
+export function goalsFeed(pp: PolicyPrincipal, device = false) {
   const shares = feedAllocation(pp);
   const goals = visibleGoals(pp).map((g) => ({ ...serializeGoal(pp, g), allocation: shares.get(g.id) ?? null }));
   const steering = workspaceSteering(pp.wsId);
-  const version = sha256hex(JSON.stringify({ goals, steering })).slice(0, 16);
-  return { version, goals, steering };
+  const due = device ? readableDueExpectations(pp).map(({ goal_id, measure_id, measure_text, due_on }) => ({ goal_id, measure_id, measure_text, due_on })) : [];
+  const feed = { goals, steering, ...(due.length ? { due_expectations: due } : {}) };
+  const version = sha256hex(JSON.stringify(feed)).slice(0, 16);
+  return { version, ...feed };
 }
 
 // ---- input ----
 
-function measuresIn(v: unknown, prev: Measure[] = []): Measure[] {
+function measuresIn(v: unknown, prev: Measure[], ws: string, configurableGoal?: GoalObject): Measure[] {
   if (v === undefined) return prev;
   if (!Array.isArray(v)) throw badRequest("measures must be a list");
   if (v.length > 10) throw badRequest("measures: at most 10");
@@ -243,10 +251,18 @@ function measuresIn(v: unknown, prev: Measure[] = []): Measure[] {
   for (const m of v) {
     if (!m || typeof m !== "object" || Array.isArray(m)) throw badRequest("each measure must be an object with text");
     const b = m as Body;
-    const text = str(b, "text", 300);
     const target = optStr(b, "target", 100);
     const keep = typeof b.id === "string" && prev.some((p) => p.id === b.id) && !out.some((o) => o.id === b.id);
-    out.push({ id: keep ? (b.id as string) : newId("m"), text, target });
+    const before = keep ? prev.find((p) => p.id === b.id)?.source : undefined;
+    const source = b.source === undefined ? before : parseMeasureSource(b.source);
+    const label = `Measure ${out.length + 1}`;
+    const text = source ? str({ [label]: b.text }, label, 300) : str(b, "text", 300);
+    if (JSON.stringify(source) !== JSON.stringify(before)) {
+      if (!configurableGoal) throw badRequest("Only the goal owner can change a reading source in the goal editor.");
+      if (source?.kind === "command" && !commandReader(ws, source.device_id, configurableGoal))
+        throw badRequest("Machine ID must belong to a paired machine whose operator can read this goal and submit readings.");
+    }
+    out.push({ id: keep ? (b.id as string) : newId("m"), text, target, ...(source ? { source } : {}) });
   }
   return out;
 }
@@ -406,12 +422,12 @@ export function versionContentOf(wsId: string, goalId: string, version: number):
  *  replace prev's, then 409 cycle when depends_on would loop and 409 no_change when nothing changed. A depends_on sent
  *  keeps the dependencies in `keepDepsFrom` (by default prev's) that the caller can't read. `loopOk` skips the cycle
  *  check, for a change request rebased with its own changes (C6-2): it adds nothing, and is never approved while it loops. */
-export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalContent, b: Body, keepDepsFrom: string[] = prev.depends_on, loopOk = false): GoalContent {
+export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalContent, b: Body, keepDepsFrom: string[] = prev.depends_on, loopOk = false, configurableGoal?: GoalObject): GoalContent {
   const status = (b.status ?? prev.status) as GoalStatus;
   if (!GOAL_STATUSES.includes(status)) throw badRequest("status must be active, achieved or dropped");
   const next: GoalContent = {
     title: b.title === undefined ? prev.title : str(b, "title", 300),
-    measures: measuresIn(b.measures, prev.measures),
+    measures: measuresIn(b.measures, prev.measures, pp.wsId, configurableGoal),
     anchors: anchorsIn(b.anchors, prev.anchors),
     status,
     depends_on: dependsIn(pp, b.depends_on, goalId, prev.depends_on, keepDepsFrom),
@@ -504,7 +520,6 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   need(pp, "goal.create", { kind: "goal_draft", podId });
   if (level === "company" && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can create a company goal.");
   const title = str(b, "title", 300);
-  const measures = measuresIn(b.measures ?? []);
   const anchors = anchorsIn(b.anchors ?? {});
   const dependsOn = dependsIn(pp, b.depends_on ?? [], null);
   const limits = limitsIn(b.limits ?? [], []);
@@ -513,6 +528,7 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals.");
   const id = await tx(() => {
+    const measures = measuresIn(b.measures ?? [], [], pp.wsId, { kind: "goal", ownerId: pp.userId, visibility, podId, level });
     const created = insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn, limits, targetShare }, at);
     // Here, not in insertGoal: the sample workspace's seeded limit is nobody's first.
     if (limits.length) event("first_limit", { ws: pp.wsId, user: pp.userId, at });
@@ -617,8 +633,10 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
   if (!g) throw notFound();
   need(pp, "goal.edit", goalObj(g));
   if (b.version !== undefined && b.version !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${g.version}.`);
-  const next = nextContent(pp, g.id, contentOf(g), b);
-  await tx(() => writeGoalVersion(g, next, pp.userId, nowIso()));
+  await tx(() => {
+    const next = nextContent(pp, g.id, contentOf(g), b, undefined, false, goalObj(g));
+    writeGoalVersion(g, next, pp.userId, nowIso());
+  });
   return serializeGoal(pp, goalRow(pp.wsId, goalId)!);
 }
 
@@ -641,6 +659,7 @@ export function goalDetail(pp: PolicyPrincipal, goalId: string) {
     .filter((c) => c.goal);
   const goal = serializeGoal(pp, g);
   const readings = latestMeasureReadings(pp.wsId, g.id, goal.measures);
+  if (authorize(pp, "goal.edit", goalObj(g)).ok) goal.measures = contentOf(g).measures;
   return {
     goal,
     measure_readings: Object.fromEntries(goal.measures.map(({ id }) => [id, readings[id] ? readingView(readings[id]) : null])),

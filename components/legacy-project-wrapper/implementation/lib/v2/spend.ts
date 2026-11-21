@@ -1,4 +1,4 @@
-import { all } from "./db";
+import { all, get } from "./db";
 import { badRequest } from "./errors";
 import { goalObj, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
@@ -187,7 +187,7 @@ export function spendTeamExport(pp: PolicyPrincipal, from: string, to: string | 
 /** One goal's usage in [from, to): the total and one row per model, summed exactly as spend() sums a goal's row (every
  *  session's usage under the goal, by the epoch it was uploaded with). No visibility check: the caller decides who sees
  *  it (the change-request snapshot, lib/v2/evidence.ts, stores it and shows it to readers who may read spend). */
-export function goalSpend(ws: string, goalId: string, from: string, to: string) {
+export function goalSpend(ws: string, goalId: string, from: string, to: string, completeDays = false) {
   const rows = all<Agg & { model: string }>(
     `SELECT u.model, u.basis, ${SUM_COLUMNS}
      FROM v2_usage u
@@ -199,9 +199,20 @@ export function goalSpend(ws: string, goalId: string, from: string, to: string) 
     from,
     to,
   );
+  const rollups = all<Agg & { model: string }>(
+    `SELECT model, basis, SUM(requests) AS requests, SUM(input) AS input, SUM(output) AS output,
+            SUM(cache_read) AS cache_read, SUM(cache_write_5m) AS cache_write_5m,
+            SUM(cache_write_1h) AS cache_write_1h, SUM(cache_write_unsplit) AS cache_write_unsplit,
+            SUM(est_list_usd_micros) AS est_list_usd_micros, SUM(unpriced_requests) AS unpriced_requests
+     FROM v2_spend_rollups
+     WHERE ws_id = ? AND goal_id = ? AND day || 'T00:00:00.000Z' >= ? AND day || 'T00:00:00.000Z' < ?
+       AND (? = 0 OR date(day, '+1 day') || 'T00:00:00.000Z' <= ?)
+     GROUP BY model, basis`,
+    ws, goalId, from, to, Number(completeDays), to,
+  );
   const total = emptySums();
   const models = new Map<string, Sums>();
-  for (const r of rows) {
+  for (const r of [...rows, ...rollups]) {
     add(total, r);
     let m = models.get(r.model);
     if (!m) models.set(r.model, (m = emptySums()));
@@ -211,4 +222,14 @@ export function goalSpend(ws: string, goalId: string, from: string, to: string) 
     .map(([model, sums]) => ({ model, ...sums }))
     .sort((a, b) => b.est_list_usd_micros - a.est_list_usd_micros || b.requests - a.requests || a.model.localeCompare(b.model));
   return { total, by_model };
+}
+
+/** A partially overlapping roll-up gives no exact spend for that part of the window. */
+export function hasPartialSpendDay(ws: string, goalId: string, from: string, to: string) {
+  return !!get(
+    `SELECT 1 FROM v2_spend_rollups
+     WHERE ws_id = ? AND goal_id = ? AND day || 'T00:00:00.000Z' < ? AND date(day, '+1 day') || 'T00:00:00.000Z' > ?
+       AND (day || 'T00:00:00.000Z' < ? OR date(day, '+1 day') || 'T00:00:00.000Z' > ?) LIMIT 1`,
+    ws, goalId, to, from, from, to,
+  );
 }
