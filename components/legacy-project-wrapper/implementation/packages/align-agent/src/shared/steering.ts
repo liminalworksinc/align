@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { clean } from "./envelope.ts";
 import { readJson, writeJsonAtomic } from "./fsx.ts";
+import { suggestionsQuiet } from "./goal-suggestions.ts";
 import { layout } from "./layout.ts";
 import type { FeedFile, Goal } from "./types.ts";
 
@@ -91,6 +92,8 @@ export interface UnsharedDigest {
   unshared_tokens: number;
   share: number;
   top: { dir: string; tokens: number }[];
+  past_goal?: { folder: string; workspace: string; goal: string; sessions: number; micros: number | null; expires_at: number };
+  past_offer_change?: string | null;
 }
 
 /** The once-a-week user-only note about agent time outside shared sessions, or null. Marks the week as shown. */
@@ -104,5 +107,13 @@ export function unsharedNote(home: string, now = Date.now()): string | null {
     .slice(0, 3)
     .map((t) => path.basename(t.dir) || t.dir)
     .join(", ");
+  const past = d.past_goal;
+  const goal = past && readJson<FeedFile>(layout.feed(home, past.workspace))?.goals
+    .find((g) => g.id === past.goal && g.bindable && g.status === "active");
+  if (past && goal && now < past.expires_at && d.past_offer_change === readJson<string>(layout.pastOfferChange(home))
+    && !suggestionsQuiet(home, past.folder)) {
+    const cost = past.micros === null ? "list-price estimate unknown" : `about $${(past.micros / 1_000_000).toFixed(2)} at list prices`;
+    return `Align: ${past.sessions} private sessions in "${clean(path.basename(past.folder), 80)}" look like work toward "${clean(goal.title, 100)}" (${cost}). Use \`align share --dir <folder> --workspace <workspace> --goal <goal> --past 7\` to preview sharing them and future sessions in the folder.`;
+  }
   return `Align: ${Math.round(d.share)}% of this machine's agent time in the last 7 days was in sessions not shared toward any goal (mostly ${dirs}). Run \`align share --dir <folder> --workspace <workspace> --goal <goal>\` to count a folder toward a goal. This stays on this machine.`;
 }

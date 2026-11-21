@@ -1,4 +1,4 @@
-export const EPOCH_ORIGINS = ["hand", "folder_rule", "anchor_hint", "alignment", "switch_request", "past_import", "suggested_agent", "suggested_model"] as const;
+export const EPOCH_ORIGINS = ["hand", "folder_rule", "anchor_hint", "alignment", "switch_request", "past_import", "suggested_agent", "suggested_model", "suggested_rule"] as const;
 export type EpochOrigin = (typeof EPOCH_ORIGINS)[number];
 
 const labels: Record<EpochOrigin, string> = {
@@ -10,6 +10,7 @@ const labels: Record<EpochOrigin, string> = {
   past_import: "Past sessions import",
   suggested_agent: "Suggested by an agent",
   suggested_model: "Suggested by a model",
+  suggested_rule: "Suggested from this machine",
 };
 
 export function epochOriginLabel(origin: EpochOrigin | null | undefined): string {

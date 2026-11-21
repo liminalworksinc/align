@@ -179,6 +179,8 @@ export class FakeServer {
   receipts: { id: string; session_key: string; state: string; at: string; auto_accepted?: boolean }[] = [];
   requests = new Map<string, FakeRequest>();
   /** Goal holds by `${ws}/${goal}` (`v2_goal_holds`). */
+  blockedModelWorkspaces = new Set<string>();
+  decisionServices = new Map<string, { url: string; revision: string }>();
   holds = new Map<string, { held_by: { id: string; name: string }; reason: string | null; at: string; directive_id: string }>();
   refreshes = 0;
   /** Refreshes refused as clock_skew. */
@@ -526,6 +528,14 @@ export class FakeServer {
       if (req.method === "GET" && p === "/api/v2/devices") {
         const list = [...this.devices.values()].map((d) => ({ id: d.id, name: d.name, created_at: d.createdAt ?? new Date(0).toISOString(), last_seen_at: d.createdAt ?? null, revoked_at: d.revoked ? new Date().toISOString() : null, revoked_reason: d.revoked ? d.revokedReason || "revoked_on_web" : null, workspaces: [], current: d.id === dev.id }));
         return send(200, { devices: list });
+      }
+      const dataSharing = /^\/api\/v2\/workspaces\/([^/]+)\/data-sharing$/.exec(p);
+      if (dataSharing && req.method === "GET") {
+        const ws = dataSharing[1];
+        const workspace = this.workspaces.find((w) => w.id === ws);
+        if (!workspace) return send(404, { error: "not_found" });
+        if (workspace.role === "viewer" && url.searchParams.get("for") === "model-suggestion") return send(403, { error: "read_only" });
+        return send(200, { blocked: this.blockedModelWorkspaces.has(ws) ? [3] : [], decision_service: this.decisionServices.get(ws) ?? null });
       }
       let m = /^\/api\/v2\/workspaces\/([^/]+)\/goals$/.exec(p);
       if (m && req.method === "GET") {

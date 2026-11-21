@@ -18,6 +18,7 @@ export interface SessionRow {
   cwd: string | null;
   started_at: string | null;
   last_active: string | null;
+  created_at: string;
   api_key_env: number;
   cloud_env: number;
   hooked: number;

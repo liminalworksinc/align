@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { gitInfo } from "../shared/anchors.ts";
 import { layout, spoolWrite } from "../shared/layout.ts";
 import { readJson, writeJsonAtomic } from "../shared/fsx.ts";
 import { clean, LIMIT_WORDS } from "../shared/envelope.ts";
@@ -21,7 +22,7 @@ function driftOn(home: string) {
 
 export function rememberTurn(home: string, lid: string, state: AnalysisTurn) {
   try {
-    writeJsonAtomic(layout.analysisTurn(home, lid), state);
+    writeJsonAtomic(layout.analysisTurn(home, lid), { ...state, git: state.cwd ? gitInfo(state.cwd) : null });
   } catch {
     /* The analysis reference must not interrupt goal delivery. */
   }
@@ -33,13 +34,15 @@ export function queueTurn(home: string, lid: string, harness: Harness, session: 
   if (!turn || (root && turn.root !== root && !turn.root.startsWith("ts:"))) return { queued: false, turn: null };
   finishTurn(home, lid, turn.root, turn.binding?.goal.version ?? null);
   const transcript = file || turn.transcript;
-  if (!transcript) return { queued: false, turn };
+  if (!transcript && turn.binding) return { queued: false, turn };
   const ts = new Date().toISOString();
   const legacy = !turn.transcript;
   let endOffset: number | undefined;
   try {
-    const stat = fs.statSync(transcript);
-    if (stat.isFile()) endOffset = stat.size;
+    if (transcript) {
+      const stat = fs.statSync(transcript);
+      if (stat.isFile()) endOffset = stat.size;
+    }
   } catch {
     /* The harness may finish writing after Stop. */
   }

@@ -214,6 +214,42 @@ CREATE TABLE IF NOT EXISTS analysis_copies (
   acknowledged INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (local_id, workspace, session_key, id)
 );
+CREATE TABLE IF NOT EXISTS goal_binding_history (
+  local_id TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  person TEXT NOT NULL,
+  folder TEXT NOT NULL,
+  repo TEXT,
+  branch TEXT,
+  goal TEXT NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY (local_id, workspace, person)
+);
+CREATE TABLE IF NOT EXISTS goal_suggestions (
+  local_id TEXT NOT NULL,
+  stage TEXT NOT NULL CHECK (stage IN ('initial','move')),
+  workspace TEXT NOT NULL,
+  root TEXT NOT NULL,
+  candidates TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY (local_id, stage)
+);
+CREATE TABLE IF NOT EXISTS goal_suggestion_feedback (
+  local_id TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  reply TEXT NOT NULL,
+  chosen TEXT,
+  at TEXT NOT NULL,
+  PRIMARY KEY (local_id, stage)
+);
+CREATE TABLE IF NOT EXISTS goal_suggestion_streaks (
+  local_id TEXT PRIMARY KEY,
+  binding TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  root TEXT NOT NULL,
+  count INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS gaps (reason TEXT PRIMARY KEY, n INTEGER NOT NULL);
 `;
 

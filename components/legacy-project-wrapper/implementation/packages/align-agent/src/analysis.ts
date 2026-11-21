@@ -2,10 +2,12 @@ import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { api, bindDevice, clockOffset, loadCredentials, serverIso, signedIn } from "./api.ts";
+import { api, bindDevice, clockOffset, loadCredentials, serverIso, signedIn, stillBound } from "./api.ts";
 import { readTurn, type RecordCount, type TurnContent } from "./analysis-transcript.ts";
 import type { Ctx } from "./context.ts";
 import { kvGet, kvSet, tx } from "./db.ts";
+import { considerGoalSuggestion, saveSuggestionConsent, suggestionConsent } from "./goal-suggestions.ts";
+import type { DecisionService } from "./decision-model.ts";
 import { loadFeed } from "./goals.ts";
 import { getShare } from "./hot.ts";
 import { takeLease } from "./lease.ts";
@@ -17,6 +19,7 @@ import { readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { layout, localId } from "./shared/layout.ts";
 import type { AnalysisExtension, AnalysisNotice, AnalysisTurn, Evidence } from "./shared/analysis.ts";
+import { invalidatePastOffer, type SuggestionOrigin, type SuggestionReply, type SuggestionStage } from "./shared/goal-suggestions.ts";
 import type { Harness, Limit, SpoolRecord } from "./shared/types.ts";
 
 const MAX_JOBS = 8;
@@ -41,6 +44,8 @@ const timeout = (deadline: number) => Math.max(1, Math.min(SEND_TIMEOUT, deadlin
 const deletionKey = (lid: string) => `analysis_deleted:${lid}`;
 const consentOf = (ctx: Ctx): Consent | null => JSON.parse(kvGet(ctx.db, CONSENT) ?? "null");
 const currentDevice = (ctx: Ctx) => loadCredentials(ctx.home)?.device_id;
+const startedAfterConsent = (turnStart: string, enabledFrom: string | null | undefined) =>
+  !!enabledFrom && turnStart > enabledFrom;
 const wireOf = ({ id, version, limit, evidence, digest }: AnalysisNotice, epoch: string, turnStartedAt: string): Wire =>
   ({ id, epoch_id: epoch, goal_version: version, limit_id: limit.id, evidence, digest, turn_started_at: turnStartedAt });
 
@@ -194,21 +199,23 @@ function finishJob(ctx: Ctx, job: Job, input: JobInput, content: TurnContent | n
     findings: findingsFor(ctx, job, turn, content),
     notices: !input.legacy,
   };
-  tx(ctx.db, () => {
-    if ((kvGet(ctx.db, deletionKey(job.local_id)) ?? "") >= turn.at) return;
+  const recorded = tx(ctx.db, () => {
+    if ((kvGet(ctx.db, deletionKey(job.local_id)) ?? "") >= turn.at) return false;
     ctx.db.prepare("DELETE FROM analysis_jobs WHERE local_id = ? AND root = ?").run(job.local_id, job.root);
     if (!ctx.db.prepare("INSERT OR IGNORE INTO analysis_results VALUES (?,?,?,?,?)")
-      .run(job.local_id, job.root, turn.at, job.ended_at, JSON.stringify(result)).changes) return;
+      .run(job.local_id, job.root, turn.at, job.ended_at, JSON.stringify(result)).changes) return false;
     const consent = consentOf(ctx);
-    if (!bind || !consent?.enabledFrom || currentDevice(ctx) !== consent.device || turn.at <= consent.enabledFrom) return;
+    if (!bind || !consent || currentDevice(ctx) !== consent.device || !startedAfterConsent(turn.at, consent.enabledFrom)) return true;
     const turnStartedAt = serverIso(turn.at, clockOffset(ctx.home));
     for (const finding of result.findings) {
       if (input.legacy && finding.evidence === "wording") continue;
       const scope: Scope = { ws: bind.workspace, key: bind.key, device: consent.device };
       enqueue(ctx, job.local_id, "analysis_put", { scope, wire: wireOf(finding, bind.epoch, turnStartedAt) });
     }
+    return true;
   });
   project(ctx, job.local_id);
+  return recorded;
 }
 
 async function syncConsent(ctx: Ctx, deadline: number) {
@@ -229,8 +236,12 @@ async function syncConsent(ctx: Ctx, deadline: number) {
 }
 
 /** A later check or goal suggestion must declare its tier here before receiving input. */
-export function analysisSharingAllowed(ctx: Ctx, capability: 2 | AnalysisExtension): boolean {
-  if (capability !== 2) return false;
+export function analysisSharingAllowed(ctx: Ctx, capability: 2 | AnalysisExtension, workspace?: string, at?: string): boolean {
+  if (capability !== 2) {
+    if (capability.kind !== "goal_suggestion" || capability.tier !== 3) return false;
+    const consent = suggestionConsent(ctx, capability.recipient, workspace);
+    return at ? startedAfterConsent(at, consent?.at) : !!consent;
+  }
   const consent = consentOf(ctx);
   return !!consent?.enabledFrom && consent.device === currentDevice(ctx);
 }
@@ -242,6 +253,19 @@ async function waitForAnalysisLease(ctx: Ctx) {
     if (unlock) return unlock;
     if (Date.now() >= waitUntil) throw new Error("Analysis is finishing. Try again in a moment.");
     await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+export async function setGoalSuggestionConsent(ctx: Ctx, recipient: AnalysisExtension["recipient"],
+  workspace: string | undefined, enabled: boolean, service?: DecisionService) {
+  if (!enabled) return saveSuggestionConsent(ctx, recipient, workspace, false);
+  const device = currentDevice(ctx);
+  const unlock = await waitForAnalysisLease(ctx);
+  try {
+    if (!stillBound(ctx) || currentDevice(ctx) !== device) throw new Error("This machine's pairing changed. Choose again for the current device.");
+    saveSuggestionConsent(ctx, recipient, workspace, enabled, service);
+  } finally {
+    unlock();
   }
 }
 
@@ -285,7 +309,7 @@ async function putResult(ctx: Ctx, row: QueuedRow, scope: Scope, wire: Wire, dea
       ? status.enabled_since : null);
   }
   const enabledSince = permissions.get(url);
-  if (!enabledSince || !wire.turn_started_at || wire.turn_started_at <= enabledSince) return true;
+  if (!startedAfterConsent(wire.turn_started_at, enabledSince)) return true;
   if (Date.now() >= deadline) return false;
   ctx.db.prepare("INSERT OR IGNORE INTO analysis_copies (local_id, workspace, session_key, device, id, payload) VALUES (?,?,?,?,?,?)")
     .run(row.local_id, scope.ws, scope.key, scope.device, wire.id, JSON.stringify(wire));
@@ -345,10 +369,16 @@ export async function runAnalysis(ctx: Ctx) {
       if (Date.now() >= deadline) break;
       const input = JSON.parse(job.input) as JobInput;
       const content = readTurn(input.harness, input.native, input.turn);
-      if (!content && job.attempts < 2) {
+      if (input.turn.transcript && !content && job.attempts < 2) {
         ctx.db.prepare("UPDATE analysis_jobs SET attempts=attempts+1, next_at=? WHERE local_id=? AND root=?")
           .run(Date.now() + 1000 * (job.attempts + 1), job.local_id, job.root);
-      } else finishJob(ctx, job, input, content);
+      } else {
+        const recorded = finishJob(ctx, job, input, content);
+        if (recorded && signedIn(ctx.home)) {
+          await considerGoalSuggestion(ctx, job.local_id, input.turn, content?.prompt,
+            (cap, ws, at) => analysisSharingAllowed(ctx, cap, ws, at)).catch(() => undefined);
+        }
+      }
     }
     const dirty = ctx.db.prepare("SELECT local_id FROM analysis_projection LIMIT ?").all(MAX_JOBS) as { local_id: string }[];
     for (const { local_id: lid } of dirty) {
@@ -366,6 +396,9 @@ export async function runAnalysis(ctx: Ctx) {
   }
 }
 
+type SavedSuggestion = { stage: SuggestionStage; workspace: string; candidates: string; origin: SuggestionOrigin; at: string };
+type SavedReply = { stage: SuggestionStage; reply: SuggestionReply; chosen: string | null; at: string };
+
 export function inspectAnalysis(ctx: Ctx, lid: string) {
   const turns = ctx.db.prepare("SELECT root, started_at, ended_at, result FROM analysis_results WHERE local_id=? ORDER BY ended_at DESC").all(lid);
   const feedback = ctx.db.prepare("SELECT root, version, kind, NULLIF(finding, '') AS finding, at FROM analysis_feedback WHERE local_id=? ORDER BY at").all(lid);
@@ -376,8 +409,14 @@ export function inspectAnalysis(ctx: Ctx, lid: string) {
       root: String(root), started_at: String(started_at), ended_at: String(ended_at), ...JSON.parse(String(result)) as Result,
     })),
     feedback,
-    sent: copies.filter((row) => row.acknowledged).map((row) => ({ workspace: row.workspace, session: row.session_key, finding: JSON.parse(String(row.payload)) })),
-    delivery_unknown: copies.filter((row) => !row.acknowledged && row.payload !== "null").map((row) => ({ workspace: row.workspace, session: row.session_key, finding: JSON.parse(String(row.payload)) })),
+    suggestions: ctx.db.prepare("SELECT stage, workspace, candidates, origin, at FROM goal_suggestions WHERE local_id=? ORDER BY at").all(lid)
+      .map((row) => {
+        const { candidates, ...saved } = row as SavedSuggestion;
+        return { ...saved, candidates: JSON.parse(candidates) as string[] };
+      }),
+    suggestion_feedback: ctx.db.prepare("SELECT stage, reply, chosen, at FROM goal_suggestion_feedback WHERE local_id=? ORDER BY at").all(lid) as SavedReply[],
+    sent: copies.filter((row) => row.acknowledged).map((row) => ({ workspace: row.workspace, session: row.session_key, finding: JSON.parse(String(row.payload)) as Wire })),
+    delivery_unknown: copies.filter((row) => !row.acknowledged && row.payload !== "null").map((row) => ({ workspace: row.workspace, session: row.session_key, finding: JSON.parse(String(row.payload)) as Wire })),
     upload_pending: pending.some((r) => r.kind === "analysis_put"),
     deletion_pending: pending.some((r) => r.kind === "analysis_delete"),
   };
@@ -389,6 +428,9 @@ export async function deleteAnalysis(ctx: Ctx, lid: string): Promise<boolean> {
   try {
     tx(ctx.db, () => {
       kvSet(ctx.db, deletionKey(lid), new Date().toISOString());
+      for (const table of ["goal_suggestions", "goal_suggestion_feedback", "goal_suggestion_streaks", "goal_binding_history"]) {
+        ctx.db.prepare(`DELETE FROM ${table} WHERE local_id=?`).run(lid);
+      }
       for (const table of ["analysis_results", "analysis_jobs", "analysis_feedback", "analysis_projection"]) ctx.db.prepare(`DELETE FROM ${table} WHERE local_id=?`).run(lid);
       ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind='analysis_put'").run(lid);
       ctx.db.prepare("UPDATE outbox SET next_at=0 WHERE local_id=? AND kind='analysis_delete'").run(lid);
@@ -396,7 +438,12 @@ export async function deleteAnalysis(ctx: Ctx, lid: string): Promise<boolean> {
       for (const scope of scopes) enqueue(ctx, lid, "analysis_delete", { scope });
       ctx.db.prepare("DELETE FROM analysis_copies WHERE local_id=?").run(lid);
     });
-    for (const file of [layout.analysis(ctx.home, lid), layout.analysisEnd(ctx.home, lid), layout.analysisLast(ctx.home, lid), layout.analysisSeen(ctx.home, lid), layout.analysisTurn(ctx.home, lid), layout.drift(ctx.home, lid)]) removeFile(file);
+    invalidatePastOffer(ctx.home);
+    const preview = layout.suggestionSharePreview(ctx.home, lid);
+    if (readJson(preview)) writeJsonAtomic(preview, true);
+    for (const file of [layout.analysis(ctx.home, lid), layout.analysisEnd(ctx.home, lid), layout.analysisLast(ctx.home, lid), layout.analysisSeen(ctx.home, lid), layout.analysisTurn(ctx.home, lid), layout.drift(ctx.home, lid),
+      layout.suggestion(ctx.home, lid), ...(["initial", "move"] as const).flatMap((stage) =>
+        [layout.suggestionReply(ctx.home, lid, stage), layout.suggestionSeen(ctx.home, lid, stage)])]) removeFile(file);
     if (signedIn(ctx.home)) await flushAnalysis(ctx, Date.now() + RUN_MS);
     return !inspectAnalysis(ctx, lid).deletion_pending;
   } finally {

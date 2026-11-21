@@ -97,9 +97,10 @@ test("the real next-turn hook delivers information without blocking or writing a
   } finally { f.cleanup(); }
 });
 
-test("one prompt delivers analysis and budget notices together, then keeps both silent on retry", () => {
+test("one prompt delivers suggestion, analysis and budget notices together, then keeps all silent on retry", () => {
   const f = fixture();
   try {
+    f.hot.cwd = f.home;
     f.hot.goal = structuredClone(SHARE_GOAL);
     f.hot.binding!.goal_id = SHARE_GOAL.id;
     writeJsonAtomic(layout.hot(f.home, f.lid), f.hot);
@@ -107,14 +108,22 @@ test("one prompt delivers analysis and budget notices together, then keeps both 
       id: "finding_one", root: "completed_turn", version: SHARE_GOAL.version, title: SHARE_GOAL.title,
       limit: { id: "limit_one", type: "must_not", text: "Change archived files" }, digest: "digest_one", evidence: "tool",
     }]);
+    writeJsonAtomic(layout.feed(f.home, "ws_one"), {
+      workspace_id: "ws_one", goals: [{ ...SHARE_GOAL, id: "g_next", title: "Finish the release", bindable: true }],
+    });
+    writeJsonAtomic(layout.suggestion(f.home, f.lid), {
+      stage: "move", workspace: "ws_one", candidates: ["g_next"], origin: "suggested_rule",
+      binding: SHARE_GOAL.id, folder: f.home,
+    });
     const result = userPromptSubmit(f.home, "claude-code", { session_id: f.sid, prompt: "Continue", prompt_id: "next_turn" }) as Record<string, any>;
+    assert.match(result.systemMessage, /looks like work toward "Finish the release"/);
     assert.match(result.systemMessage, /work may have crossed a limit/);
     assert.match(result.systemMessage, /80%/);
     assert.match(result.hookSpecificOutput.additionalContext, /80%/);
-    assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /work may have crossed a limit|A tool confirmed/);
+    assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /looks like work|Finish the release|work may have crossed a limit|A tool confirmed/);
     assert.notEqual(result.decision, "block");
     const retry = userPromptSubmit(f.home, "claude-code", { session_id: f.sid, prompt: "Continue", prompt_id: "later_turn" });
-    assert.doesNotMatch(JSON.stringify(retry), /80%|work may have crossed a limit/);
+    assert.doesNotMatch(JSON.stringify(retry), /80%|looks like work|work may have crossed a limit/);
   } finally { f.cleanup(); }
 });
 

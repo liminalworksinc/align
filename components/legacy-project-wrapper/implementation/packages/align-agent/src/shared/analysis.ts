@@ -1,3 +1,4 @@
+import type { GitInfo } from "./anchors.ts";
 import type { GoalSnapshot, Limit } from "./types.ts";
 import type { EpochOrigin } from "./epoch-origin.ts";
 
@@ -8,6 +9,7 @@ export interface AnalysisTurn {
   transcript: string | null;
   endOffset?: number;
   cwd: string | null;
+  git?: GitInfo | null;
   binding: {
     workspace: string;
     key: string;

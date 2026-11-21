@@ -134,13 +134,16 @@ function TeamMembers({ ws, team, members, owner, me, onDone }: { ws: string; tea
 const SHARE_TIERS = [
   [1, "Work signals"],
   [2, "Derived results (proposed)"],
-  [3, "Model input (proposed)"],
+  [3, "Model-based goal suggestions (proposed)"],
   [4, "Deliberate excerpts (proposed)"],
 ] as const;
 
 function SharingRestrictions({ ws }: { ws: string }) {
   const url = `/api/v2/workspaces/${ws}/data-sharing`;
-  const settings = useApi<{ blocked: number[] }>(url);
+  const settings = useApi<{ blocked: number[]; decision_service: { url: string } | null }>(url);
+  const [address, setAddress] = useState<string | null>(null);
+  const addressChange = useAction();
+  const savedAddress = settings.data?.decision_service?.url ?? "";
   const change = useAction();
   const blockedTiers = settings.data?.blocked;
   return (
@@ -159,6 +162,25 @@ function SharingRestrictions({ ws }: { ws: string }) {
           Block {label}
         </label>
       ))}
+      {settings.data && (
+        <form className="mt-3 min-w-0 space-y-2" onSubmit={(event) => {
+          event.preventDefault();
+          const decision_service_url = address?.trim() || null;
+          void addressChange.run(async () => {
+            const saved = await api<{ decision_service: { url: string } | null }>(url, { method: "PATCH", body: { decision_service_url } });
+            setAddress(saved.decision_service?.url ?? "");
+          }, settings.reload);
+        }}>
+          <Field label="Decision service address" hint="People can choose to send their first prompt and eligible goals to this address from their machine. Leave it blank to remove the service."
+            error={addressChange.error}>
+            <Input type="url" maxLength={2048} disabled={addressChange.busy} value={address ?? savedAddress} onChange={(event) => {
+              setAddress(event.target.value);
+              addressChange.setError(null);
+            }} />
+          </Field>
+          <Btn type="submit" disabled={addressChange.busy || address === null || address.trim() === savedAddress}>Save address</Btn>
+        </form>
+      )}
     </Panel>
   );
 }

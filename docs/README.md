@@ -48,3 +48,4 @@ explicit parent change.
 - [Proposed measure sources](decisions/0004-proposed-measure-sources.md)
 - [Proposed goal-list review and unbound usage decision](decisions/0005-goal-list-review.md)
 - [Proposed session data boundary](decisions/0006-session-data-boundary.md)
+- [Proposed consent for goal suggestions](decisions/0007-goal-suggestion-consent.md)
