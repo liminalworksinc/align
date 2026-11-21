@@ -114,7 +114,7 @@ function testReadingUpgrade() {
     d.exec("PRAGMA foreign_keys = ON;");
     const rows = d.prepare("SELECT id, value_num, source, source_ref, goal_version FROM v2_measure_readings ORDER BY rowid DESC").all();
     const version = d.prepare("PRAGMA user_version").get().user_version;
-    check("LIM-2524: a schema 29 database upgrades through 30 to 34", version === SCHEMA_VERSION, version);
+    check("LIM-2524: a schema 29 database upgrades through 30 to 35", version === SCHEMA_VERSION, version);
     check("LIM-2524: migration 30 preserves legacy reading order and keeps unknown source details and version",
       rows.map((r) => r.id).join() === "mr_later,mr_one" && rows[0].value_num === 2 &&
       rows.every((r) => r.source === "self" && r.source_ref === null && r.goal_version === null) &&
@@ -202,7 +202,7 @@ function testExcerptUpgrade() {
     const records = () => JSON.stringify(preserve.map((name) => legacy.prepare(`SELECT * FROM ${name}`).all()));
     const before = records();
     const upgrade = migrateFixture(dir);
-    check("LIM-2528: populated schema 33 upgrades to 34 without losing existing findings and choices",
+    check("LIM-2528: populated schema 33 upgrades through 34 to 35 without losing existing findings and choices",
       excerptMigration === 33 && upgrade.status === 0 && records() === before
         && legacy.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION
         && legacy.prepare("PRAGMA foreign_key_check").all().length === 0
@@ -216,6 +216,41 @@ function testExcerptUpgrade() {
       ["v2_device_excerpt_consent", "v2_session_excerpts", "v2_excerpt_readers", "v2_excerpt_share_ids", "v2_model_send_windows", "v2_model_check_blocks", "v2_excerpt_storage_cleanup"]
         .every((name) => legacy.prepare("SELECT 1 FROM sqlite_schema WHERE name = ?").get(name)
           && !legacy.prepare(`SELECT 1 FROM ${name}`).get()));
+  } finally {
+    legacy.close();
+  }
+}
+
+function testDecisionDispatchUpgrade() {
+  const dir = path.join(testDir, "decision-dispatch");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const legacy = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    const dispatchMigration = migrations.findIndex((sql) => /capability IN \('suggestion', 'limit_check', 'excerpt'\)/.test(sql));
+    legacy.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, dispatchMigration)) legacy.exec(sql);
+    legacy.exec(`
+      INSERT INTO ba_user VALUES ('u_old');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_old', 'Old workspace', 'u_old', '${OLD}');
+      INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES ('ws_old', 'u_old', 'owner', '${OLD}');
+      INSERT INTO v2_devices (id,user_id,name,public_key,created_at) VALUES ('dev_old','u_old','Laptop','key','${OLD}');
+      INSERT INTO v2_device_excerpt_consent VALUES ('dev_old', 1, 4);
+      INSERT INTO v2_data_restrictions VALUES ('ws_old', 3);
+      INSERT INTO v2_model_check_blocks VALUES ('ws_old');
+      INSERT INTO v2_workspace_decision_services VALUES ('ws_old', 'https://decision.example.test/', 'old-revision');
+      INSERT INTO v2_model_send_windows VALUES ('ws_old', 'suggestion', ${Date.now() + 60_000});
+      PRAGMA user_version = ${dispatchMigration};
+      PRAGMA foreign_keys = ON;
+    `);
+    const preserve = ["v2_device_excerpt_consent", "v2_data_restrictions", "v2_model_check_blocks", "v2_workspace_decision_services"];
+    const choices = () => JSON.stringify(preserve.map((table) => legacy.prepare(`SELECT * FROM ${table}`).all()));
+    const before = choices();
+    migrateFixture(dir);
+    check("LIM-2527: schema 35 expires earlier dispatch windows and preserves sharing choices",
+      dispatchMigration === 34 && choices() === before && !legacy.prepare("SELECT 1 FROM v2_model_send_windows").get()
+      && legacy.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION
+      && legacy.prepare("PRAGMA foreign_key_check").all().length === 0
+      && legacy.prepare("PRAGMA integrity_check").get().integrity_check === "ok");
   } finally {
     legacy.close();
   }
@@ -394,6 +429,7 @@ try {
   }
   testSuggestionOriginUpgrade();
   testExcerptUpgrade();
+  testDecisionDispatchUpgrade();
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],
     ["purge dry-run", ["workspaces", "delete", WS, "--purge", "--yes", "--dry-run"]],

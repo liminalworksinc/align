@@ -14,6 +14,7 @@ import { nowIso } from "../src/db.ts";
 import { ensureSession } from "../src/ledger.ts";
 import { renderHot } from "../src/hot.ts";
 import { agentMayRead, pathHash, podReport, repoIdentity, siblingNews, type PodFeed, type RemoteItem } from "../src/hooks/siblings.ts";
+import { crossingDigest, exampleCrossings } from "../src/shared/drift.ts";
 import { DRIFT_PER_LIMIT } from "../src/hooks/handlers.ts";
 import { writeJsonAtomic, readJson } from "../src/shared/fsx.ts";
 import { layout } from "../src/shared/layout.ts";
@@ -183,6 +184,27 @@ describe("A2-cross-1: a drift notice latches the crossing sentence, never the wh
   });
 });
 
+test("reply and transcript notices use the same repeat history, feedback target and cap", () => {
+  const { t, sid, lid, turn } = driftWorld();
+  const quote = "We will drop the old ledger cluster tonight, before the cutover finishes.";
+  const limit = LIMITS[0];
+  const earlier = exampleCrossings(limit, quote, {})[0];
+  assert.ok(earlier);
+  assert.match(turn(quote), /may conflict with a limit/);
+  const prompt = (id: string, text = "Continue") => runHook(t, "claude", "UserPromptSubmit",
+    { session_id: sid, prompt_id: id, prompt: text }).stdout;
+  assert.match(prompt("false-alarm", "::align drift wrong"), /false alarm/);
+  const notice = { id: "earlier", root: "earlier-turn", version: 1, title: "Cut over the ledger database",
+    limit, evidence: "wording", digest: "keyed-earlier", repeat: crossingDigest(limit.id, earlier.sentence) };
+  writeJsonAtomic(layout.analysis(t.home, lid), [notice]);
+  assert.equal(sysOf(prompt("repeat")), "");
+  writeJsonAtomic(layout.analysis(t.home, lid), [{ ...notice, id: "second", digest: "second", repeat: "different-evidence" }]);
+  assert.match(sysOf(prompt("second")), /work may have crossed/);
+  assert.match(turn("I'm going to drop the old ledger cluster now, ahead of the cutover."), /may conflict with a limit/);
+  writeJsonAtomic(layout.analysis(t.home, lid), [{ ...notice, id: "fourth", digest: "fourth", repeat: "fourth-evidence" }]);
+  assert.equal(sysOf(prompt("fourth")), "");
+});
+
 describe("A2-cross-4: a notice covering several limits names each, and latches only what it named", () => {
   test("a notice covering several limits names each (M8: three limits in one reply)", () => {
     const { t, lid, turn } = driftWorld();
@@ -202,7 +224,8 @@ describe("A2-cross-4: a notice covering several limits names each, and latches o
       v: 1,
       goal_id: "g1",
       goal_title: "Cut over the ledger database",
-      items: LIMITS.map((l) => ({ limit_id: l.id, type: l.type, text: l.text, digests: [`d${l.id}`] })),
+      items: LIMITS.map((l) => ({ limit_id: l.id, type: l.type, text: l.text, digests: [`d${l.id}`],
+        turns: { [`d${l.id}`]: { root: "completed", version: 1 } } })),
       at: nowIso(),
     };
     writeJsonAtomic(layout.drift(t.home, lid), file);

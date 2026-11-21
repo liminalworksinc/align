@@ -17,8 +17,8 @@ choices and rights you have. "Align", "we" and "us" mean [LEGAL ENTITY]. Write t
   people put in a workspace. We process it on behalf of the organization the workspace belongs to (our customer),
   under our agreement with them and the [data processing agreement](dpa.md). That organization's own privacy notice
   governs it; we help them answer requests about it.
-- **Local mode.** Align can run on your own computer instead of on our servers. Then everything stays on your
-  computer, and we receive none of it.
+- **Local mode.** Align can run on your own computer. Your workspace data goes to that local Align server.
+  Session sharing sends metadata by default. Separate choices below can send additional data to the recipients described below.
 
 ## What we collect
 
@@ -32,8 +32,9 @@ choices and rights you have. "Align", "we" and "us" mean [LEGAL ENTITY]. Write t
 | Connected AI apps | For each app you connect: its name and return address as it gives them, the workspace, when you connected it and last used it, a hash of its refresh token, and the scopes you granted | You and the app <!-- lib/oauth/grants.ts --> |
 | Workspace data (we are processor) | Workspace name, members and their roles, teams, invites (the invitee's email), goals and their versions, alignments, change requests with their notes and decisions, evidence links on change requests, labelled self-reported or agent-reported, and goal snapshots Align computes, directives, and the audit log | People in the workspace <!-- lib/v2/db.ts --> |
 | Shared sessions (we are processor) | For each agent session a person chooses to share: which agent it was (Claude Code or Codex), a hashed repository key, an optional repository alias, times, state, the goal it works toward, and token usage with estimated cost | The `align` agent on the person's computer <!-- docs/RETENTION.md --> |
-| Work signals (we are processor) | For 24 hours: hashes of files a shared session touched, and, only if the person turns on "share work signals", file paths and short text such as a task or commit title | The `align` agent <!-- lib/v2/activity.ts --> |
-| Deliberate excerpts (proposed) | The passage, readers, purpose and expiry you confirm. Shared with those readers until expiry or revocation. | You, on the machine that shared the session |
+| Work signals (we are processor) | File hashes for edits and claims. Opting in to work signals adds repo-relative file paths, branch names, commit subjects and task or claim labels. People who can read the goal can see those names. Claims expire at one hour and other activity at 24 hours. | The `align` agent <!-- lib/v2/activity.ts --> |
+| Derived findings (proposed, local mode only) | The finding, binding and limit identifiers, goal version, evidence label, keyed digest and turn start time. A separate opt-in sends them to the local server. Only the sharing device can read them, and they expire after 30 days. | The Align agent |
+| Deliberate excerpts (proposed) | The passage, readers, purpose and expiry you confirm. You and the named readers can open it until expiry or revocation, up to seven days. | You, on the machine that shared the session |
 | Access requests | Email, name, company, team size, what you want to use Align for, and your interest (try or evaluate) | You, on the request-access form <!-- app/app/request-access/view.tsx --> |
 | Creation codes | A keyed hash of each code, the email it is for, its dates, and the workspace it created | Us <!-- lib/v2/db.ts v2_creation_codes --> |
 | Abuse prevention | Rate-limit counters keyed by a keyed hash of an email address or network address; when the bot check is on, what Cloudflare Turnstile collects in your browser and your IP address | Your browser <!-- lib/v2/limits.ts; lib/v2/captcha.ts --> |
@@ -66,8 +67,13 @@ any AI model provider.
 - **Google and GitHub**, if you choose to sign in with them.
 - **People in your workspace**, according to their role and the visibility of each goal. Only you and the people
   you name can read an excerpt you share.
-- **The decision service your workspace owner configures**, if you opt in to model limit checks. Your machine sends the final
-  assistant reply and selected limit wording directly to the recipient shown in the preview.
+- **The decision service you select for goal suggestions**, if you turn on that separate choice. Your machine sends
+  the first prompt, branch when known, saved repository alias when present, and eligible goal ids and titles directly
+  to that service. A session question would instead send eligible goal ids and titles to the session's existing
+  provider and account. The current integrations skip that question because they cannot pin the original account.
+- **The decision service your workspace owner configures**, if you opt in to model limit checks. Your machine sends
+  the final assistant reply up to 2,000 UTF-8 bytes and the types and wording of up to ten applicable limits
+  directly to the recipient shown in the preview.
 - **AI apps you connect**, which read one workspace as you, with your permissions. You choose them, and their makers
   handle what they read under their own terms.
 - **Authorities**, when the law requires it, and a successor if [LEGAL ENTITY] is merged or sold, under this policy.
@@ -78,7 +84,9 @@ Our full retention schedule is published at [RETENTION.md](../RETENTION.md) and 
 
 - Sign-in sessions: 7 days from last use, never more than 30 days from sign-in. Email codes: 5 minutes.
 - Shared session details: 13 months after the session ends, then only totals with no person attached.
-- Work signals: 24 hours.
+- Claims expire at one hour and other activity at 24 hours.
+- Derived findings on a local server expire 30 days after the turn started.
+- Shared excerpts expire at the chosen time, up to seven days.
 - Workspace audit log: 1 year.
 - People who leave a workspace: shown as "Former member" there after 30 days.
 - A deleted workspace: restorable for 30 days, then deleted, and gone from our backups within 38 days.

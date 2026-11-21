@@ -1219,7 +1219,9 @@ the revision, including creation, counters and rebases. It SHALL compare only th
 stored base version. Each row SHALL record `kind`, `element_key` and `change` (`added`, `removed` or `changed`).
 Use a limit's ID for `limit`, a depended-on goal's ID for `dependency`, a measure's ID for `measure` and the field
 name for `field` (`title`, `status` or `anchors`). Anchors remain editable by goal owners only. Target share is outside
-change requests, and reallocations use a separate record. Reordering a list alone SHALL yield no element keys.
+change requests, and reallocations use a separate record. Reordering a list alone SHALL yield no element keys. A change to a limit's manual source title, path anchors or
+either approved example SHALL index that limit. Repo-relative anchors SHALL accept literal path segments
+including Unicode letters and parentheses.
 Server migration 29 SHALL create the element index after launch expectations, outcome history, and measure
 readings. The migration that creates the index SHALL backfill every stored revision against its own base
 version in the same transaction, regardless of the migration's schema version. It SHALL skip and count

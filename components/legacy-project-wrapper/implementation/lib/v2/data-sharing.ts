@@ -1,17 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../config";
-import { all, audit, get, run, tx } from "./db";
+import { all, audit, DISPATCH_WINDOW_MS, get, run, trackDispatchWindow, tx } from "./db";
 import type { DevicePrincipal } from "./devices";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { nowIso } from "./ids";
-import { goalObj, goalRow } from "./goals";
+import { expireOptionalSessionData, scheduleOptionalSessionExpiry } from "./retention";
+import { bindableFor, goalObj, goalRow, visibleGoals } from "./goals";
 import { authorize, canReadGoal, type PolicyPrincipal } from "./policy";
 import { ownSession, sessionRow, wasSessionDeleted } from "./sessions";
 import type { Body } from "./validate";
 import { memberPrincipal, need } from "./workspaces";
 
-const MODEL_SEND_MS = { suggestion: 2950, limit_check: 1500 } as const;
-type ModelCapability = keyof typeof MODEL_SEND_MS;
+type ModelCapability = "suggestion" | "limit_check";
+type DispatchCapability = ModelCapability | "excerpt" | "work_signals" | "derived_results";
 const TIERS = [1, 2, 3, 4] as const;
 const EVIDENCE = ["wording", "example", "tool", "file", "git", "model"] as const;
 const FINDING_FIELDS = ["id", "epoch_id", "goal_version", "limit_id", "evidence", "digest", "turn_started_at"] as const;
@@ -38,8 +39,13 @@ export function tierBlocked(ws: string, tier: Tier) {
   return !!get("SELECT 1 FROM v2_data_restrictions WHERE ws_id = ? AND tier = ?", ws, tier);
 }
 
-function decisionService(ws: string) {
+function storedDecisionService(ws: string) {
   return get<{ url: string; revision: string }>("SELECT url, revision FROM v2_workspace_decision_services WHERE ws_id = ?", ws) ?? null;
+}
+
+function decisionService(ws: string) {
+  const stored = storedDecisionService(ws);
+  return stored && allowedDecisionUrl(stored.url) === stored.url ? stored : null;
 }
 
 export function dataRestrictions(pp: PolicyPrincipal) {
@@ -47,7 +53,7 @@ export function dataRestrictions(pp: PolicyPrincipal) {
   return { blocked, model_check_blocked: modelBlocked(pp.wsId, "limit_check"), decision_service: decisionService(pp.wsId) };
 }
 
-function decisionServiceUrl(value: unknown): string | null {
+function allowedDecisionUrl(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value === "string" && value.length <= 2048) {
     try {
@@ -60,67 +66,47 @@ function decisionServiceUrl(value: unknown): string | null {
       // Use the field label for all invalid addresses.
     }
   }
-  throw badRequest("Decision service address must be an HTTPS URL without credentials, a query or a fragment.");
+  return null;
 }
 
 function modelBlocked(ws: string, capability: ModelCapability) {
   return capability === "suggestion" ? tierBlocked(ws, 3) : !!get("SELECT 1 FROM v2_model_check_blocks WHERE ws_id = ?", ws);
 }
 
-function sendUntil(ws: string, capability: ModelCapability) {
-  return get<{ until_ms: number }>("SELECT until_ms FROM v2_model_send_windows WHERE ws_id = ? AND capability = ?", ws, capability)?.until_ms ?? 0;
-}
-
-async function waitForWindow(until: number) {
-  for (let remaining = until - Date.now(); remaining > 0; remaining = until - Date.now()) {
-    await new Promise((resolve) => setTimeout(resolve, remaining));
-  }
-}
-
 export async function setDataRestriction(pp: PolicyPrincipal, b: Body) {
   const { wsId: ws } = pp;
-  const wait = await tx((): { until?: number; blocked?: ModelCapability } => {
-    need(memberPrincipal(pp.wsId, pp.userId), "workspace.manage");
+  return tx(() => {
+    need(memberPrincipal(ws, pp.userId), "workspace.manage");
     if (Object.hasOwn(b, "decision_service_url") && Object.keys(b).length === 1) {
-      const url = decisionServiceUrl(b.decision_service_url);
-      if ((decisionService(pp.wsId)?.url ?? null) !== url) {
-        if (url === null) run("DELETE FROM v2_workspace_decision_services WHERE ws_id = ?", pp.wsId);
-        else run(`INSERT INTO v2_workspace_decision_services (ws_id, url, revision) VALUES (?, ?, ?)
-          ON CONFLICT(ws_id) DO UPDATE SET url = excluded.url, revision = excluded.revision`, pp.wsId, url, randomUUID());
-        audit(ws, pp.userId, "data_sharing.decision_service_changed", null, nowIso());
-        return { until: Math.max(sendUntil(ws, "suggestion"), sendUntil(ws, "limit_check")) };
+      const url = allowedDecisionUrl(b.decision_service_url);
+      if (url === null && b.decision_service_url !== null) {
+        throw badRequest("Decision service address must be an HTTPS URL without credentials, a query or a fragment.");
       }
-      return {};
-    }
-    if (typeof b.model_check_blocked === "boolean" && Object.keys(b).length === 1) {
+      if ((storedDecisionService(ws)?.url ?? null) !== url) {
+        if (url === null) run("DELETE FROM v2_workspace_decision_services WHERE ws_id = ?", ws);
+        else run(`INSERT INTO v2_workspace_decision_services (ws_id, url, revision) VALUES (?, ?, ?)
+          ON CONFLICT(ws_id) DO UPDATE SET url = excluded.url, revision = excluded.revision`, ws, url, randomUUID());
+        audit(ws, pp.userId, "data_sharing.decision_service_changed", null, nowIso());
+      }
+    } else if (typeof b.model_check_blocked === "boolean" && Object.keys(b).length === 1) {
       if (modelBlocked(ws, "limit_check") !== b.model_check_blocked) {
         if (b.model_check_blocked) run("INSERT INTO v2_model_check_blocks (ws_id) VALUES (?)", ws);
         else run("DELETE FROM v2_model_check_blocks WHERE ws_id = ?", ws);
         audit(ws, pp.userId, b.model_check_blocked ? "data_sharing.model_check_blocked" : "data_sharing.model_check_unblocked", null, nowIso());
       }
-      return b.model_check_blocked ? { blocked: "limit_check" } : {};
+    } else {
+      const tier = b.tier as Tier;
+      if (!TIERS.includes(tier) || typeof b.blocked !== "boolean" || Object.keys(b).length !== 2) {
+        throw badRequest("Choose a sharing restriction and whether to block it.");
+      }
+      if (tierBlocked(ws, tier) !== b.blocked) {
+        if (b.blocked) run("INSERT INTO v2_data_restrictions (ws_id, tier) VALUES (?, ?)", ws, tier);
+        else run("DELETE FROM v2_data_restrictions WHERE ws_id = ? AND tier = ?", ws, tier);
+        audit(ws, pp.userId, b.blocked ? `data_sharing.tier_${tier}_blocked` : `data_sharing.tier_${tier}_unblocked`, null, nowIso());
+      }
     }
-    const tier = b.tier as Tier;
-    if (!TIERS.includes(tier) || typeof b.blocked !== "boolean" || Object.keys(b).length !== 2) {
-      throw badRequest("Choose a sharing restriction and whether to block it.");
-    }
-    if (tierBlocked(pp.wsId, tier) !== b.blocked) {
-      if (b.blocked) run("INSERT INTO v2_data_restrictions (ws_id, tier) VALUES (?, ?)", pp.wsId, tier);
-      else run("DELETE FROM v2_data_restrictions WHERE ws_id = ? AND tier = ?", pp.wsId, tier);
-      audit(pp.wsId, pp.userId, b.blocked ? `data_sharing.tier_${tier}_blocked` : `data_sharing.tier_${tier}_unblocked`, null, nowIso());
-    }
-    return tier === 3 && b.blocked ? { blocked: "suggestion" } : {};
+    return dataRestrictions(pp);
   });
-  if (wait.until) await waitForWindow(wait.until);
-  if (wait.blocked) {
-    // The workspace may have unblocked and issued another window while a save was waiting.
-    while (modelBlocked(ws, wait.blocked)) {
-      const until = sendUntil(ws, wait.blocked);
-      if (until <= Date.now()) break;
-      await waitForWindow(until);
-    }
-  }
-  return dataRestrictions(pp);
 }
 
 export async function setDeviceSharingConsent(dev: DevicePrincipal, b: Body) {
@@ -169,34 +155,62 @@ export function currentDeviceWorkspace(pp: PolicyPrincipal, dev: DevicePrincipal
   return current;
 }
 
-function grantModelWindow(ws: string, capability: ModelCapability) {
+function modelPermission(ws: string, capability: ModelCapability, phase: string | null, revision: string | null) {
   if (modelBlocked(ws, capability)) return { enabled: false };
-  const send_for_ms = MODEL_SEND_MS[capability];
-  run(`INSERT INTO v2_model_send_windows (ws_id, capability, until_ms) VALUES (?, ?, ?)
-    ON CONFLICT(ws_id, capability) DO UPDATE SET until_ms = max(until_ms, excluded.until_ms)`,
-  ws, capability, Date.now() + send_for_ms);
-  return { enabled: true, send_for_ms };
+  if (phase === "answer") {
+    return { enabled: dispatchRevisionMatches(ws, capability, revision) };
+  }
+  if (phase !== "dispatch") return { enabled: false };
+  return grantDispatchWindow(ws, capability);
 }
 
-export async function suggestionSendWindow(pp: PolicyPrincipal, dev: DevicePrincipal) {
+export function dispatchRevisionMatches(ws: string, capability: DispatchCapability, revision: string | null) {
+  return !!revision && !!get("SELECT 1 FROM v2_model_send_windows WHERE ws_id = ? AND capability = ? AND revision = ?", ws, capability, revision);
+}
+
+export function grantDispatchWindow(ws: string, capability: DispatchCapability) {
+  const row = get<{ revision: string; until_ms: number }>(`INSERT INTO v2_model_send_windows (ws_id, capability, until_ms, revision)
+    VALUES (?, ?, ?, lower(hex(randomblob(16))))
+    ON CONFLICT(ws_id, capability) DO UPDATE SET until_ms = max(until_ms + 1, excluded.until_ms)
+    RETURNING revision, until_ms`, ws, capability, Date.now() + DISPATCH_WINDOW_MS)!;
+  trackDispatchWindow(ws, capability, row.until_ms);
+  return { enabled: true, send_for_ms: DISPATCH_WINDOW_MS, revision: row.revision };
+}
+
+export async function suggestionSendWindow(pp: PolicyPrincipal, dev: DevicePrincipal, phase: string | null,
+  revision: string | null, workspaceRecipient: boolean) {
   return tx(() => {
-    need(currentDeviceWorkspace(pp, dev), "session.share");
-    return { ...dataRestrictions(pp), ...grantModelWindow(pp.wsId, "suggestion") };
+    const current = currentDeviceWorkspace(pp, dev);
+    need(current, "session.share");
+    const decision_service = decisionService(pp.wsId);
+    if (workspaceRecipient && !decision_service) return { enabled: false };
+    if (phase === "answer") return { ...modelPermission(pp.wsId, "suggestion", phase, revision), decision_service };
+    if (phase !== "dispatch" || modelBlocked(pp.wsId, "suggestion")) return { enabled: false };
+    const goals = visibleGoals(current).filter((goal) => bindableFor(current, goal))
+      .map(({ id, title }) => ({ id, title }));
+    if (!goals.length || goals.length > 254) return { enabled: false };
+    return { ...modelPermission(pp.wsId, "suggestion", phase, revision), decision_service, goals };
   });
 }
 
-export async function modelSendWindow(pp: PolicyPrincipal, dev: DevicePrincipal, key: string) {
+export async function modelSendWindow(pp: PolicyPrincipal, dev: DevicePrincipal, key: string,
+  phase: string | null, revision: string | null, epoch: string | null) {
   return tx(() => {
     const current = currentDeviceWorkspace(pp, dev);
     const session = ownSession(current, dev, key);
     need(current, "session.share");
     const decision_service = decisionService(pp.wsId);
-    if (session.state !== "shared" || !decision_service) return { enabled: false };
-    return { ...grantModelWindow(pp.wsId, "limit_check"), decision_service };
+    if (session.state !== "shared" || !decision_service || !epoch) return { enabled: false };
+    const binding = get<{ goal_id: string | null }>(
+      "SELECT goal_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epoch,
+    );
+    const goal = binding?.goal_id ? goalRow(pp.wsId, binding.goal_id) : null;
+    if (!goal || !canReadGoal(current, goalObj(goal))) throw notFound();
+    return { ...modelPermission(pp.wsId, "limit_check", phase, revision), decision_service };
   });
 }
 
-export async function setWorkSignals(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
+export async function setWorkSignals(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body, epochs: string[] | null = null) {
   return tx(() => {
     const current = currentDeviceWorkspace(pp, dev);
     const session = ownSession(current, dev, key);
@@ -208,7 +222,9 @@ export async function setWorkSignals(pp: PolicyPrincipal, dev: DevicePrincipal, 
       run("UPDATE v2_sessions SET work_signals = ? WHERE ws_id = ? AND session_key = ?", Number(b.enabled), pp.wsId, key);
       audit(pp.wsId, pp.userId, b.enabled ? "data_sharing.work_signals_on" : "data_sharing.work_signals_off", null, nowIso());
     }
-    return { enabled: b.enabled };
+    if (!epochs || !b.enabled) return { enabled: b.enabled };
+    const readable = [...new Set(epochs)].filter((epoch) => findingGoal(current, key, epoch));
+    return readable.length ? { ...grantDispatchWindow(pp.wsId, "work_signals"), epochs: readable } : { enabled: false };
   });
 }
 
@@ -218,9 +234,32 @@ function resultsStart(pp: PolicyPrincipal, dev: DevicePrincipal, session: Return
   return deviceConsent(dev);
 }
 
-export function readFindings(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, statusOnly: boolean) {
+function findingGoal(pp: PolicyPrincipal, key: string, epoch: string) {
+  const binding = get<{ goal_id: string | null }>("SELECT goal_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epoch);
+  const goal = binding?.goal_id ? goalRow(pp.wsId, binding.goal_id) : null;
+  return !!goal && canReadGoal(pp, goalObj(goal));
+}
+
+export async function resultSendWindow(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, epoch: string | null,
+  phase: string, revision: string | null) {
+  return tx(() => {
+    const current = currentDeviceWorkspace(pp, dev);
+    const session = ownSession(current, dev, key);
+    if (!epoch || !findingGoal(current, key, epoch)) throw notFound();
+    const available = !config().hosted;
+    const enabledSince = resultsStart(current, dev, session);
+    if (!enabledSince) return { available, enabled: false };
+    const permission = phase === "dispatch" ? grantDispatchWindow(pp.wsId, "derived_results")
+      : { enabled: dispatchRevisionMatches(pp.wsId, "derived_results", revision) };
+    return { ...permission, available, enabled_since: enabledSince };
+  });
+}
+
+export async function readFindings(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, statusOnly: boolean, epoch: string | null) {
+  if (!statusOnly) await expireOptionalSessionData();
   const current = currentDeviceWorkspace(pp, dev);
   const session = ownSession(current, dev, key);
+  if (epoch && !findingGoal(current, key, epoch)) throw notFound();
   const available = !config().hosted;
   const enabledSince = resultsStart(current, dev, session);
   const status = { available, enabled: !!enabledSince, enabled_since: enabledSince };
@@ -228,9 +267,10 @@ export function readFindings(pp: PolicyPrincipal, dev: DevicePrincipal, key: str
   const cutoff = since();
   return {
     ...status,
-    findings: all<Finding>(`SELECT ${columns} FROM v2_analysis_findings
+    findings: available ? all<Finding>(`SELECT ${columns} FROM v2_analysis_findings
       WHERE ws_id = ? AND session_key = ? AND device_id = ? AND turn_started_at > ? AND received_at > ?
-      ORDER BY received_at, id`, pp.wsId, key, dev.deviceId, cutoff, cutoff),
+      ORDER BY received_at, id`, pp.wsId, key, dev.deviceId, cutoff, cutoff)
+      .filter((finding) => findingGoal(current, key, finding.epoch_id)) : [],
   };
 }
 
@@ -250,13 +290,13 @@ function findingIn(b: Body): Finding {
 }
 
 export async function putFinding(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
-  return tx(() => {
+  const accepted = await tx(() => {
     const current = currentDeviceWorkspace(pp, dev);
     const session = ownSession(current, dev, key);
     need(current, "session.share");
     if (config().hosted) throw hostedRefusal();
-    const enabledSince = resultsStart(current, dev, session);
-    if (!enabledSince) throw forbidden("results_off", "Sharing derived results is off.");
+    const enabledSince = deviceConsent(dev);
+    if (!enabledSince || session.state !== "shared") throw forbidden("results_off", "Sharing derived results is off.");
     const finding = findingIn(b);
     const cutoff = since();
     if (finding.turn_started_at <= cutoff) throw findingGone();
@@ -273,31 +313,41 @@ export async function putFinding(pp: PolicyPrincipal, dev: DevicePrincipal, key:
        JOIN v2_goal_versions v ON v.ws_id = e.ws_id AND v.goal_id = e.goal_id AND v.version = ?
        JOIN json_each(v.limits_json) l
        WHERE e.ws_id = ? AND e.session_key = ? AND e.epoch_id = ?
-         AND v.version >= e.goal_version_at_start AND (e.ends_at IS NULL OR v.created_at <= e.ends_at)
+         AND v.version >= e.goal_version_at_start AND v.created_at <= ?
          AND ? >= e.starts_at AND (e.ends_at IS NULL OR ? <= e.ends_at)
          AND json_extract(l.value, '$.id') = ?`,
-      finding.goal_version, pp.wsId, key, finding.epoch_id, finding.turn_started_at, finding.turn_started_at, finding.limit_id,
+      finding.goal_version, pp.wsId, key, finding.epoch_id, finding.turn_started_at, finding.turn_started_at, finding.turn_started_at, finding.limit_id,
     );
     const goal = version ? goalRow(pp.wsId, version.goal_id) : null;
     if (!goal || !canReadGoal(current, goalObj(goal))) throw notFound();
     if (old) return finding;
+    if (tierBlocked(pp.wsId, 2)) throw forbidden("results_off", "Sharing derived results is off.");
     if (get("SELECT 1 FROM v2_analysis_findings WHERE ws_id = ? AND session_key = ? AND device_id = ? AND turn_started_at > ? AND received_at > ? LIMIT 1 OFFSET 499", pp.wsId, key, dev.deviceId, cutoff, cutoff)) {
       throw conflict("findings_full", "This session has reached its derived results limit.");
     }
     run(`INSERT INTO v2_analysis_findings (ws_id, session_key, device_id, id, epoch_id, goal_version, limit_id, evidence, digest, turn_started_at, received_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ...args, finding.epoch_id, finding.goal_version, finding.limit_id, finding.evidence, finding.digest, finding.turn_started_at, nowIso());
     return finding;
-  });
+  }).finally(expireOptionalSessionData);
+  scheduleOptionalSessionExpiry();
+  return accepted;
 }
 
-export async function deleteFindings(pp: PolicyPrincipal, dev: DevicePrincipal, key: string) {
+export async function deleteFindings(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, before: string | null) {
   await tx(() => {
     const current = currentDeviceWorkspace(pp, dev);
     if (!sessionRow(pp.wsId, key) && wasSessionDeleted(current, key)) return;
-    ownSession(current, dev, key);
+    const session = ownSession(current, dev, key);
     const at = nowIso();
-    run("UPDATE v2_sessions SET analysis_deleted_at = MAX(COALESCE(analysis_deleted_at, ''), ?) WHERE ws_id = ? AND session_key = ?", at, pp.wsId, key);
-    const removed = run("DELETE FROM v2_analysis_findings WHERE ws_id = ? AND session_key = ? AND device_id = ?", pp.wsId, key, dev.deviceId);
-    if (removed) audit(pp.wsId, pp.userId, "data_sharing.results_deleted", null, at);
+    const parsed = before === null ? null : Date.parse(before);
+    if (parsed !== null && (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== before || parsed > Date.parse(at) + 5000)) {
+      throw badRequest("Choose a valid deletion cutoff.");
+    }
+    const cutoff = before ?? session.analysis_deleted_at ?? at;
+    if (session.analysis_deleted_at && session.analysis_deleted_at >= cutoff) return;
+    run("UPDATE v2_sessions SET analysis_deleted_at = ? WHERE ws_id = ? AND session_key = ?", cutoff, pp.wsId, key);
+    run("DELETE FROM v2_analysis_findings WHERE ws_id = ? AND session_key = ? AND device_id = ? AND turn_started_at <= ?",
+      pp.wsId, key, dev.deviceId, cutoff);
+    audit(pp.wsId, pp.userId, "data_sharing.results_deleted", null, at);
   });
 }

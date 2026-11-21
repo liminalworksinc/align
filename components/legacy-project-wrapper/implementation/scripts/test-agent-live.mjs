@@ -1098,6 +1098,7 @@ try {
   // E2E-AGENT cycle 7 C7-2: signed in again, the session stopped from the web is told so, as its deny says.
   const q1In = prompt(Q1, "are we back?");
   const q1InDeny = denied(tool(Q1, "Bash")) ?? "";
+  prompt(Q1, "::align share");
   const reshare = prompt(Q1, "::align share confirm");
   sync();
   const q1Again = sdb((d) => d.prepare("SELECT state, ended_reason, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
@@ -1134,6 +1135,7 @@ try {
       (xwShare.json?.reason ?? "").includes("so it stays stopped") && xwRow?.state === "stopped" && xwRow.ended_reason === null,
     `${xwStop.status} before=${xwBeforeLogout} listed=${JSON.stringify(xwListed)} told=${xwTold.stdout} sessions=${xwSessions} share=${xwShare.stdout} row=${JSON.stringify(xwRow)}`,
   );
+  r7Prompt("::align share");
   const r7Again = r7Prompt("::align share confirm");
   sync();
   const r7Row = sdb((d) => d.prepare("SELECT state, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, r7Key));
@@ -1263,6 +1265,7 @@ try {
         approve3.status === 200 && login3Code === 0 && !existsSync(path.join(alignHome, "revoke.json")),
       `log=${(() => { try { return readFileSync(path.join(alignHome, "logs", "align.log"), "utf8").split("\n").filter((l) => /revoke|already/.test(l)).slice(-4).join(" / "); } catch { return ""; } })()} logout=${offLogout.code} sync=${offSync.code} pending=${offPending} login=${login3Code} approve=${approve3.status} old=${JSON.stringify(oldRevoked)} q1=${JSON.stringify(q1Ended)} device=${JSON.stringify(offDevice)} session=${JSON.stringify(offSession)} revokeLeft=${existsSync(path.join(alignHome, "revoke.json"))} | ${login3Out}`,
     );
+    prompt(Q1, "::align share");
     const reshare3 = prompt(Q1, "::align share confirm");
     sync();
     const q1Third = sdb((d) => d.prepare("SELECT state, ended_reason, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
@@ -1418,6 +1421,7 @@ try {
   const reMe = meIds();
   const reTold = prompt(Q1, "back again?");
   const reTold2 = prompt(Q1, "and now?");
+  prompt(Q1, "::align share");
   const reShare = prompt(Q1, "::align share confirm");
   sync();
   const q1Back = sdb((d) => d.prepare("SELECT state, ended_reason, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
@@ -1447,6 +1451,7 @@ try {
   const q3Back = denied(tool(Q3, "Bash")) ?? "";
   const q3Latch = cli(["latch", "status"]).stdout;
   const q3Lid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === Q3.sid)?.local_id ?? "none";
+  prompt(Q3, "::align share");
   const q3Share = prompt(Q3, "::align share confirm");
   sync();
   const q3Shared = denied(tool(Q3, "Bash")) ?? "";

@@ -20,8 +20,8 @@ export default function Page() {
     <TrustFrame>
       <h1 className={`${PAGE_H1} mb-3`}>Trust</h1>
       <p className="mb-4">
-        By default, your prompts, replies and tool output stay on your machine. You can separately choose to send the final reply and applicable limits to the decision service your workspace owner configures, or share a selected excerpt with named readers through Align. Both choices are off by default, including in local mode.
-        These documents are drafts under review.
+        Shared sessions send metadata by default, including in local mode. By default, your prompts, replies and tool output stay on your machine. For optional goal suggestions, your selected service receives the first prompt, branch,
+        saved repository alias and eligible goal ids and titles. You can also choose to send the final reply and applicable limits to the decision service your workspace owner configures, or share a selected excerpt with named readers through Align. These documents are drafts under review.
       </p>
       <ul className="mb-6 list-disc pl-6">
         {sections.map((d) => (

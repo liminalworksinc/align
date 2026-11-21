@@ -7,7 +7,7 @@ import { layout, spoolWrite } from "../shared/layout.ts";
 import type { FeedFile } from "../shared/types.ts";
 
 function available(home: string, lid: string, stage: SuggestionStage, feed: FeedFile | null, binding: string | null, suggestion = readJson<GoalSuggestion>(layout.suggestion(home, lid))) {
-  if (!suggestion || !feed || suggestion.stage !== stage || suggestion.binding !== binding || suggestion.workspace !== feed.workspace_id
+  if (readJson<{ signed_out?: boolean }>(layout.me(home))?.signed_out || !suggestion || !feed || suggestion.stage !== stage || suggestion.binding !== binding || suggestion.workspace !== feed.workspace_id
     || suggestionsQuiet(home, suggestion.folder) || readJson(layout.suggestionReply(home, lid, stage))) return null;
   const goals = suggestion.candidates.flatMap((id) => feed.goals.filter((g) => g.id === id && g.bindable && g.status === "active"));
   return goals.length === suggestion.candidates.length && goals.length ? { suggestion, goals } : null;
@@ -33,7 +33,7 @@ export function takeGoalSuggestion(home: string, lid: string, cwd: string | null
     return null;
   }
   const names = current.goals.map(({ title }) => `"${clean(title, 100)}"`).join(" or ");
-  const how = stage === "move" ? "`::align bind <goal>`" : current.goals.length === 1 ? "`::align share` to preview sharing" : "`::align share <goal>` to pick one";
+  const how = stage === "move" ? "`::align bind <goal>` to preview changing the goal" : current.goals.length === 1 ? "`::align share` to preview sharing" : "`::align share <goal>` to pick one";
   return `Align: this session looks like work toward ${names}. Type ${how}, \`::align not this\` if the goal is wrong, \`::align dismiss\` to skip, or \`::align quiet\` to stop suggestions in this folder.`;
 }
 

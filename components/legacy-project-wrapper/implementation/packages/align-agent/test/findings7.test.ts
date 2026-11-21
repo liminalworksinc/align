@@ -77,6 +77,7 @@ describe("C6-1: a session whose shared history was deleted is shared again from 
     turn(t, A, "req_d1_signed_out");
     await sleep(20);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    prompt(t, A.sid, "::align share", A.cwd);
     prompt(t, A.sid, "::align share confirm", A.cwd);
     await sync(t);
     const lastBefore = turn(t, A, "req_d1_shared_again");
@@ -91,7 +92,7 @@ describe("C6-1: a session whose shared history was deleted is shared again from 
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /Counting: {3}from now \(/);
     assert.match(r.stdout, /This session was shared before, so this share counts from now\./);
-    assert.match(r.stdout, / 0 finalized request rows now/);
+    assert.match(r.stdout, /for 0 completed requests/);
     await sync(t);
     assert.equal(serverRows(fake, A.key).length, 0, "no row made before the re-share goes up");
     const after = turn(t, A, "req_d1_after", 50);
@@ -124,6 +125,7 @@ describe("C6-1: a session whose shared history was deleted is shared again from 
     assert.equal(del.code, 0, del.stderr);
     assert.match(del.stdout, /already deleted on the server/);
 
+    prompt(t, A.sid, "::align share --dir", A.cwd);
     const dir = prompt(t, A.sid, "::align share --dir confirm", A.cwd);
     assert.match(dir.reason, /This session stays private: its sharing was stopped \(or its history deleted\)\./);
     await sync(t);
@@ -176,6 +178,7 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
 
     fake.workspaces = [acme];
     await sync(t);
+    prompt(t, A.sid, "::align share", A.cwd);
     prompt(t, A.sid, "::align share confirm", A.cwd);
     await sync(t);
     assert.equal(deny(t, A), PLAIN, "shared again: the web can resume it");
@@ -214,6 +217,7 @@ describe("C6-3: a removal the device never saw is not worded as a stop for good"
     assert.doesNotMatch(told.systemMessage, /sharing_stopped/);
     const row = JSON.parse((await runCli(t, ["sessions", "--all", "--json"])).stdout).find((s: { native_id: string }) => s.native_id === A.sid);
     assert.equal(row.shared, "stopped (Acme; ended while out of the workspace; `::align share` shares it again)");
+    prompt(t, A.sid, "::align share", A.cwd);
     assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested/);
     await sync(t);
     assert.equal(fake.sessions.get(A.key)!.state, "shared");
@@ -233,6 +237,7 @@ describe("C6-3: a removal the device never saw is not worded as a stop for good"
       prompt(t, A.sid, "go on", A.cwd).systemMessage,
       "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.",
     );
+    prompt(t, A.sid, "::align share --dir", A.cwd);
     assert.match(prompt(t, A.sid, "::align share --dir confirm", A.cwd).reason, /This session stays private/);
   });
 });
@@ -250,6 +255,7 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     fake.workspaces = [acme];
     await sync(t);
     prompt(t, A.sid, "go on", A.cwd); // the "can reach ... again" notice
+    prompt(t, A.sid, "::align share", A.cwd);
     assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested toward "Ship the v2 onboarding flow"/);
     await sync(t);
     const resumed = json(runHook(t, "claude", "SessionStart", { session_id: A.sid, source: "resume", cwd: A.cwd }).stdout);
@@ -260,6 +266,7 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     prompt(t, B.sid, "go on", B.cwd);
     assert.equal((await runCli(t, ["logout"])).code, 0);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    prompt(t, B.sid, "::align share", B.cwd);
     assert.match(prompt(t, B.sid, "::align share confirm", B.cwd).reason, /sharing requested/);
     await sync(t);
     const told = prompt(t, B.sid, "go on", B.cwd);
@@ -390,6 +397,7 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     turn(t, A, "req_g1_gap");
     await sleep(80);
     await sync(t); // the upload is refused: the share ends here, later than on the server
+    prompt(t, A.sid, "::align share", A.cwd);
     prompt(t, A.sid, "::align share confirm", A.cwd);
     await sync(t);
     await sync(t);

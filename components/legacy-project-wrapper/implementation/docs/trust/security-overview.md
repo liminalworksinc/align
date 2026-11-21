@@ -21,7 +21,7 @@ stay on the machine where the session ran. The excerpts and model checks describ
 - Connected AI apps get read-only access to one workspace, as the person who connected them; adding evidence links
   needs a separate scope.
 - Data is deleted on a published schedule ([retention](../RETENTION.md)), and an account can be deleted in the app.
-- Local mode runs the Align server on your machine. Optional decision checks can still send the final reply to the service you configure.
+- Local mode runs the Align server on your machine. If you opt in to model limit checks, the final reply goes to the decision service your workspace owner configures.
 - Not yet: SOC 2, ISO 27001, a penetration test, SSO/SAML/SCIM. See "Not yet" below.
 
 ## Architecture
@@ -42,8 +42,8 @@ stay on the machine where the session ran. The excerpts and model checks describ
 | Account: email, name, profile picture address from Google or GitHub, linked sign-in methods, passkeys (public keys) | Passwords (there are none) |
 | Workspace: members and roles, teams, invites, goals and their versions, alignments, change requests and decisions, directives | Full transcripts and automated copies of prompt text, tool output, replies, code and files |
 | Shared sessions: harness, a hashed repository key, an optional repository alias, times, state, goal binding, token usage and estimated cost | A session title: the `align` agent sends none <!-- docs/RETENTION.md --> |
-| Work signals for 24 hours: hashes of files touched; file paths and short text only if the person turns on "share work signals" | Anything from a session the person did not choose to share |
-| Change request evidence: typed links (pull request, CI run, incident, dashboard, document or other) labelled self-reported or agent-reported, and a goal snapshot Align computes itself | Any claim that evidence is verified: Align labels it, it does not check it |
+| File hashes for edits and claims. Work signals add repo-relative paths, branch names, commit subjects and task or claim labels for people who can read the goal. Claims expire at one hour and other activity at 24 hours. | Anything from a session the person did not choose to share |
+| Change request evidence: typed links (pull request, CI run, incident, dashboard, document or other) labelled self-reported or agent-reported, and a goal snapshot Align computes itself | Evidence ratings or independent fact checks |
 | Product events: an event name, the workspace, a keyed hash of the person, the time and a few allowlisted properties | Emails, names, titles, URLs or tokens in those events |
 | Audit log: who did what to which object, and when | The content of goals or requests in the audit log |
 
@@ -53,7 +53,7 @@ Metadata is the default for a shared session. Work signals are a separate choice
 With hosted Align, derived findings stay on the machine. The proposed option to send them is off by default
 and only works with a local Align server. When a person turns it on, the local server can receive finding,
 binding and limit ids, the goal version, the turn start time, an evidence label and a keyed digest for new
-turns. The person can inspect and delete these records from that machine. Workspace owners can block the option.
+turns. Only the sharing device can read these records. The person can delete them at any time and they expire after 30 days. Workspace owners can block the option.
 
 A local installation reads the original transcript files, which stay on the machine.
 
@@ -66,8 +66,8 @@ The proposed recipients are listed in [subprocessors](subprocessors.md). Align r
 source only when the person confirms.
 
 Model limit checks and deliberate excerpts are proposed, separate choices. An opted-in model check sends the
-final assistant reply and selected limit wording from the machine to the workspace decision service shown in its preview. The request goes directly from the device. An excerpt requires a preview and confirmation of the selected text,
-readers, purpose and expiry. Only the sharer and named readers can see it. The sharer can revoke it at any time.
+final assistant reply up to 2,000 bytes and the wording and type of up to ten limits from the machine to the workspace decision service shown in its preview. The request goes directly from the device. An excerpt requires a preview and confirmation of the selected text,
+readers, purpose and expiry. Only the sharer and named readers can see it. The sharer can revoke it at any time. The selected expiry can be up to seven days.
 Hosted workspaces cannot receive full transcripts. Workspace owners can block model checks and new excerpts.
 
 ## Signing in
