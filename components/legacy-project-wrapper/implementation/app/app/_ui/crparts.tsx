@@ -5,6 +5,7 @@ import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, mea
 import { LIMIT_WORDS } from "./limits";
 import { EvidenceLabel } from "./ds";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
+import { DraftPrecedents } from "./precedents";
 import { counterSameAsBase, counterSameAsRequest, dependsOnFull, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
 import { count } from "@/lib/v2/plural.mts";
 import { isBlankText } from "@/lib/v2/text-core.mts";
@@ -136,6 +137,7 @@ export function ChangesForm({
   noteLabel,
   noteRequired,
   withCondition = false,
+  showDraftPrecedents = false,
   sendLabel,
   busy,
   onSend,
@@ -161,6 +163,7 @@ export function ChangesForm({
   noteRequired: boolean;
   /** Offer the "Accept if…" condition (an approver's counter). */
   withCondition?: boolean;
+  showDraftPrecedents?: boolean;
   sendLabel: string;
   busy: boolean;
   onSend: (changes: ChangeFields, note: string, condition: string) => void;
@@ -273,6 +276,7 @@ export function ChangesForm({
           )}
         </div>
       )}
+      {showDraftPrecedents && differs && title.trim() && <DraftPrecedents ws={ws} goal={goal.id} version={goal.version} changes={changes} />}
       <Field label={noteLabel} hint="Never sent to agents. 1 to 2000 characters.">
         <TextArea rows={3} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} required={noteRequired} />
       </Field>

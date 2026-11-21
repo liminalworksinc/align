@@ -55,6 +55,7 @@ The events, where they are recorded and what they may carry:
 | `first_expectation` | the workspace's first expectation recorded at launch | the workspace, the launcher | none |
 | `outcome_reported` | an expectation answer or correction is recorded | the workspace, the reporter | `outcome`: `met`, `not_met` or `cant_tell` |
 | `first_reading` | the workspace's first self-reported measure reading | the workspace, the person | none |
+| `first_precedent_shown` | a precedent read first returns at least one item to the requester or a person who can decide, including a draft read by its proposer | the workspace, the person | none |
 | `first_directive` | the workspace's first directive that reached a session | the workspace, none | `kind` |
 | `first_mcp_read` | the workspace's first MCP tool call | the workspace, the person | `client`: `app` or `device` |
 | `loi_sent` | the operator records it | the workspace, none | `note_ref` |
@@ -72,8 +73,8 @@ The events, where they are recorded and what they may carry:
 ### Requirement: Product events
 
 The server SHALL append a product event to `v2_events` at each code point in the events table above, inside the
-transaction of the action it records (so an action that fails records nothing), except the first MCP read, which a
-read-only tool call records in its own short transaction without ever failing the read; it SHALL record a first-time
+transaction of the action it records (so an action that fails records nothing), except the first MCP read and first
+precedent shown, which record in their own short transactions without failing the read; it SHALL record a first-time
 event at most once per workspace and a once-per-person event at most once per person in a workspace, enforced by unique
 partial indexes that ignore a row with no actor; it SHALL keep the table append-only (a trigger refuses changing an event's id, name, time or
 props); and it SHALL do the same in Mode L, where the events stay on the person's machine and nothing is sent anywhere.
@@ -92,6 +93,12 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 
 - **WHEN** two launches include expectations, a person reports an outcome and corrects it, and people record two readings
 - **THEN** there is one `first_expectation`, one `first_reading` and one `outcome_reported` for each recorded answer, carrying only its fixed choice. Later expectations and readings do not produce another first event after those events expire
+
+#### Scenario: The first relevant precedent read counts once
+
+- **WHEN** a viewer without a decision role reads matches, a requester reads an empty result, and then a requester
+  or a current approver reads matches several times
+- **THEN** only the first eligible read with matches records `first_precedent_shown`, once in the workspace and without props
 
 #### Scenario: Sample workspace
 

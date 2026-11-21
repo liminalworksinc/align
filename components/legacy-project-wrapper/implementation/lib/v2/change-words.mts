@@ -56,6 +56,31 @@ export interface ChangeWordsOptions {
 
 const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
+export function keyedChanges<T>(
+  before: T[],
+  after: T[],
+  key: (item: T) => string,
+  differs: (before: T, after: T) => boolean,
+): { before?: T; after?: T; change: "added" | "removed" | "changed" }[] {
+  const previous = new Map(before.map((item) => [key(item), item]));
+  const changes: ReturnType<typeof keyedChanges<T>> = [];
+  for (const item of after) {
+    const id = key(item);
+    const was = previous.get(id);
+    previous.delete(id);
+    if (was === undefined) changes.push({ after: item, change: "added" });
+    else if (differs(was, item)) changes.push({ before: was, after: item, change: "changed" });
+  }
+  for (const item of previous.values()) changes.push({ before: item, change: "removed" });
+  return changes;
+}
+
+export const measureChanged = (before: MeasureLike, after: MeasureLike) =>
+  before.text !== after.text || (before.target ?? null) !== (after.target ?? null);
+
+export const limitChanged = (before: LimitLike, after: LimitLike) =>
+  before.text !== after.text || before.type !== after.type;
+
 /** One line per change in one field of a diff (title, measures, depends_on, status, limits). */
 export function changeWords(field: string, d: FieldDiff, o: ChangeWordsOptions = {}): string[] {
   const q = o.q ?? ((s: string) => s);
@@ -66,14 +91,13 @@ export function changeWords(field: string, d: FieldDiff, o: ChangeWordsOptions =
     const a = list<MeasureLike>(d.after);
     const t = (x: string | null) => (x === null || x === undefined || x === "" ? "none" : q(x));
     const out: string[] = [];
-    for (const m of a) {
-      const was = b.find((x) => x.id === m.id);
-      if (!was) out.push(`Added measure ${q(m.text)}${m.target ? ` (target ${q(m.target)})` : ""}`);
+    for (const { before: was, after: m } of keyedChanges(b, a, (x) => x.id, measureChanged)) {
+      if (!m) out.push(`Removed measure ${q(was!.text)}`);
+      else if (!was) out.push(`Added measure ${q(m.text)}${m.target ? ` (target ${q(m.target)})` : ""}`);
       else if (was.text !== m.text && (was.target ?? null) !== (m.target ?? null)) out.push(`Measure ${q(was.text)} became ${q(m.text)}, target ${t(was.target)} ${arrow} ${t(m.target)}`);
       else if (was.text !== m.text) out.push(`Measure ${q(was.text)} became ${q(m.text)}`);
       else if ((was.target ?? null) !== (m.target ?? null)) out.push(`${q(m.text)} target ${t(was.target)} ${arrow} ${t(m.target)}`);
     }
-    for (const m of b) if (!a.some((x) => x.id === m.id)) out.push(`Removed measure ${q(m.text)}`);
     return out.length ? out : ["Measures reordered"];
   }
   if (field === "limits") {
@@ -81,19 +105,19 @@ export function changeWords(field: string, d: FieldDiff, o: ChangeWordsOptions =
     const a = list<LimitLike>(d.after);
     const w = (l: LimitLike) => `${LIMIT_WORDS[l.type] ?? l.type}: ${q(l.text)}`;
     const out: string[] = [];
-    for (const l of a) {
-      const was = b.find((x) => x.id === l.id);
-      if (!was) out.push(`Added limit ${w(l)}`);
-      else if (was.text !== l.text || was.type !== l.type) out.push(`Limit ${w(was)} became ${w(l)}`);
+    for (const { before: was, after: l } of keyedChanges(b, a, (x) => x.id, limitChanged)) {
+      if (!l) out.push(`Removed limit ${w(was!)}`);
+      else if (!was) out.push(`Added limit ${w(l)}`);
+      else out.push(`Limit ${w(was)} became ${w(l)}`);
     }
-    for (const l of b) if (!a.some((x) => x.id === l.id)) out.push(`Removed limit ${w(l)}`);
     return out.length ? out : ["Limits reordered"];
   }
   if (field === "depends_on") {
     const b = list<string>(d.before);
     const a = list<string>(d.after);
-    const added = a.filter((id) => !b.includes(id));
-    const removed = b.filter((id) => !a.includes(id));
+    const keys = keyedChanges(b, a, (id) => id, () => false);
+    const added = keys.flatMap(({ after }) => after === undefined ? [] : [after]);
+    const removed = keys.flatMap(({ before }) => before === undefined ? [] : [before]);
     // The ones the reader can't read are counted, never named, after any named ones, as on the rest of the card (C5-3).
     const more = Math.max(0, (d.hidden?.after ?? 0) - (d.hidden?.before ?? 0));
     const fewer = Math.max(0, (d.hidden?.before ?? 0) - (d.hidden?.after ?? 0));

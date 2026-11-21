@@ -30,6 +30,35 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [ ] LIM-2522: Show earlier decisions on the same goal items
+
+- **Priority:** P0
+- **Owner:** Align change requests, their web review controls and decision records
+- **Direction:** Show people earlier decisions on the items they are proposing to change or deciding on.
+- **Conclusion:** Match stored revisions by element ID on the same goal and use the existing request read policy.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Specify revision indexing, precedent reads, visibility, presentation and event recording.
+    The spec validation command accepted all eight documents.
+  - [x] Index existing and new revisions, and expose earlier decisions to the app and connected clients.
+    Server migration 29 follows the expectations migration and backfills from the base versions, counting missing bases.
+  - [x] Test migration, matching, visibility, event recording and proposal and review controls at 390 px.
+    The 14 packet server and browser checks passed on Node 24.22.3.
+  - [x] Keep the backfill attached to the migration when its schema version changes, and test the runner with a shifted version.
+    The regression covers the direct upgrade from schema 28 to 29 and a simulated migration at a later version.
+    Both paths passed all six upgrade checks. `test-admin` reported 68 passed and 0 failed.
+  - [x] Pass the full local test gate and spec validation. Record the outcome in the changelog.
+    `ALIGN_TEST_PORT=4600 npm test` on Node 24.22.3 reported 2,074 passed and 0 failed.
+    `litai spec validate specs/align --id-prefix align` accepted all eight documents.
+    The retained test receipt is stale.
+- **Merge verification:** Node 26.3.0: the first 28 server migrations match the lower branch byte for byte;
+  migration 29 adds the precedent index. Lint, app type generation and typecheck, agent typecheck and build pass.
+  Budget checks pass 69/0 and admin checks pass 68/0, including the direct and shifted index upgrades.
+  The 393 listener-free agent checks first pass 391/2; the two affected files pass 17/0 when run sequentially.
+  Serial latency reports 0 passed, 0 failed and 2 skipped because the host is too busy to measure. Limits stay
+  unchanged. Syntax checks pass for the three listener-dependent scripts.
+  No conflict markers remain. Listener-dependent execution remains unverified; the index and history stay unchanged.
+
 ### [x] LIM-2520: Record launch expectations, outcomes and measure readings
 
 - **Owner:** Align goals, change requests, Home and MCP contracts
@@ -250,6 +279,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] Specify the route, CSV fields, privacy and phone controls before implementation.
   - [x] Implement the export route, shared month validation, exact table row and amount parity with all no-goal usage unallocated, plus the Spend export form.
   - [x] HTTP authorization, the browser download and the 390 pixel controls are covered in test-v2. The budget domain suite covers CSV totals and privacy across retention.
+
 
 
 ### [x] TX-001: Recover from transaction and preview setup failures

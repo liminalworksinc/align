@@ -1013,6 +1013,63 @@ The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goa
 - **WHEN** an approver approves a request and says not yet, and a workspace owner (a launcher) opens the Requests tab and the Home
 - **THEN** both list it as waiting on them: `waiting_on_me` is true and the Home has it under "Waiting on you" as "Approved, not launched"
 
+### Requirement: Index the items each change request revision changes
+
+The server SHALL store changed element keys by workspace, goal, request and revision in the transaction that writes
+the revision, including creation, counters and rebases. It SHALL compare only the revision's changed fields with its
+stored base version. Each row SHALL record `kind`, `element_key` and `change` (`added`, `removed` or `changed`).
+Use a limit's ID for `limit`, a depended-on goal's ID for `dependency`, a measure's ID for `measure` and the field
+name for `field` (`title`, `status` or `anchors`). Anchors remain editable by goal owners only. Target share is outside
+change requests, and reallocations use a separate record. Reordering a list alone SHALL yield no element keys.
+Server migration 29 SHALL create the element index after launch expectations, outcome history, and measure
+readings. The migration that creates the index SHALL backfill every stored revision against its own base
+version in the same transaction, regardless of the migration's schema version. It SHALL skip and count
+revisions whose base version is missing. An element row SHALL be deleted with its revision or goal.
+
+#### Scenario: An edited measure keeps its identity when it carries its ID
+
+- **WHEN** a revision edits a measure with its old ID and replaces another by omitting its ID
+- **THEN** the index records one changed measure and a removal and addition for the replacement, even if its text is the same
+
+#### Scenario: A counter and a rebase use their own base versions
+
+- **WHEN** a request receives a counter and is later rebased onto a newer goal version
+- **THEN** each stored revision keeps its own keys, and each key describes the difference from that revision's base
+
+### Requirement: Read earlier decisions on the same goal items
+
+`GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests/{id}/precedents` SHALL return `{precedents}` for that
+request's current revision. `POST /api/v2/workspaces/{ws}/goals/{goal}/change-requests/precedents` SHALL accept
+`{base_version, changes, reason?}` from the proposal form (the reason is unused) and apply the same matching to the
+draft against the current goal version. It SHALL apply the limits suggestion rate limits (20 per minute per person,
+120 per hour per workspace, with its own buckets) and write no request, revision, goal version or audit row.
+Both reads SHALL allow viewers and return 404 for a goal or request the caller cannot read or a request on another goal.
+
+The server SHALL consider at most five earlier requests on the same goal whose state is `approved`, `rejected` or
+`superseded` and whose current revision shares at least one readable pair of `kind` and `element_key`.
+It SHALL rank by shared item count descending, then decision time descending. A request on file before a draft
+is earlier. For stored requests with the same creation time, use insertion order. Unreadable dependencies SHALL be
+excluded from the shared keys and the ranking.
+
+Each item SHALL include `id`, `state`, `launch`, `base_version`, `resulting_version`, `decided_at`, `decided_by`
+(`{id, name}` or null under the existing name and former-member rules), `shared_elements` (each with `kind`,
+`element_key`, the earlier revision's `change` and a readable `label` when applicable), `decision_note`,
+`rejection_reason` and `outcome: "never_assessed"`. Notes and reasons on these results SHALL use the existing
+decline-reason audience: that earlier request's requester, its rejecter and its current effective approvers.
+A superseded request uses its supersession time and the actor from the supersession audit row when still available.
+
+#### Scenario: A newer request shares two items with an earlier decision
+
+- **WHEN** an approved request shares two readable items with the current revision, a more recent decline shares one,
+  and a withdrawn request shares all of them
+- **THEN** the approval comes before the decline, the withdrawn request is absent, and no unreadable dependency
+  makes a request appear or rank higher
+
+#### Scenario: A viewer reads an earlier decline
+
+- **WHEN** the earlier requester and a viewer read precedents that include a decline
+- **THEN** both see its shared items, who declined and when, and only the earlier requester sees the reason
+
 ### Requirement: Proposing a reallocation
 
 The server SHALL let a workspace owner or member (viewers 403 `read_only`) propose new target shares on `POST /api/v2/workspaces/{ws}/reallocations {targets:[{goal_id, target_share}], note?}` (browser session, body at most 16 KB) and respond 201 with the reallocation (`id` `rl_…`, `revision: 1`). Each target SHALL name a goal the caller may read (404 otherwise) that is `active` (409 `goal_not_active`), at most once, with `target_share` a whole number from 0 to 100 or `null` (400); `targets` SHALL hold 1 to 50 entries and `note` at most 1000 characters (400). The reallocation SHALL keep only the goals whose target changes, each with the goal's version and target at that time (409 `no_change` when none changes), and SHALL be refused with 409 `targets_over_100` when the workspace's targets with these changes would pass 100. Each kept goal needs one approval from its effective approval set (the requester rule and workspace-owner fallback apply per goal); the requester's own goals are approved by asking. When every goal is then approved the reallocation is `approved` with `launch: "pending"`, else `pending`. Proposing SHALL write no goal version and no directive, and audit `reallocation.requested`.

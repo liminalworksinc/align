@@ -1303,6 +1303,30 @@ when nothing is.
 - **WHEN** an approver opens the last request waiting on them from the Home and confirms **Approve and launch**
 - **THEN** the drawer says "Recorded: you approved revision <r> and launched version <m>." and then "Nothing else waits on you." with **Back to the list**
 
+### Requirement: Earlier decisions in change proposal and review
+
+The propose drawer and the change request review controls on the goal page and in the Requests drawer SHALL show a
+collapsed section, "Earlier decisions on the same items (<n>)", when their precedent read returns at least one
+item. After a draft edit, the section SHALL reflect the current proposed fields. The section SHALL be absent
+when the result is empty. If the read is unavailable, say that earlier decisions are unknown.
+
+Each row SHALL link to the earlier request's decision record and say "v<base>: <Approved | Declined | Superseded>
+<time ago> by <name>", using "unknown" for missing information. It SHALL describe the shared items and how the
+earlier revision changed them, show the launch state of an approved request, and show the decision note or reason
+only when supplied by the read. Each declined row SHALL say "Circumstances may have changed since." Earlier
+decisions SHALL carry no authority over the proposal or its approval.
+
+#### Scenario: A person checks earlier decisions before sending or deciding
+
+- **WHEN** a person edits a proposal that touches an item from an earlier decline, or opens its later request for review
+- **THEN** the collapsed section names the earlier decision and its shared items when opened, explains that
+  circumstances may have changed, and links to the record. The section fits a 390 px screen.
+
+#### Scenario: Earlier decisions are unavailable
+
+- **WHEN** the review drawer cannot read earlier decisions
+- **THEN** it says "Earlier decisions are unknown." and the review controls remain available
+
 ### Requirement: Evidence on change request cards
 
 Every change request card on the goal page SHALL show (the Requests tab lists requests as one Desk list and opens each in the review drawer, which has its own evidence summary; see "Workspace Requests tab"), under "Evidence for revision <n>"

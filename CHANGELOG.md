@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- When proposing or reviewing a goal change, open Earlier decisions to see up to five past decisions on the same items,
+  with reasons where you have access and links to the records. Connected clients can read the same history on decision records.
+  Server migration 29 indexes changed items on existing request revisions.
 - Launchers can record an expectation for a goal measure and report its outcome from Home or the request.
   The goal page shows self-reported measure readings and their history. MCP includes these readings on goal
   and brief reads, and includes expectations and outcomes in decision records. Server migration 28 adds these records.

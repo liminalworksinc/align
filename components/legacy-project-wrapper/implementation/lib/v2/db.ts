@@ -6,6 +6,7 @@ import { config } from "../config";
 import { readChangeset, type CsChange, type CsRecord } from "./changeset.mts";
 import { SCHEMA_VERSION, type Sql } from "./core.mts";
 import { count } from "./plural.mts";
+import { backfillChangeElements } from "./change-elements.mts";
 
 // Goal sessions storage: one SQLite file (WAL) at <ALIGN_DATA_DIR or ./data>/v2/align.sqlite, directory 0700, file 0600.
 // Two connections to the same file:
@@ -1472,6 +1473,24 @@ const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX v2_events_once_expectations_readings ON v2_events(name, ws_id)
     WHERE ws_id IS NOT NULL AND name IN ('first_expectation', 'first_reading');
   `,
+  // Migration 29: index the items each revision changes. Backfilled in the same migration transaction below.
+  `
+  CREATE TABLE v2_change_request_elements (
+    ws_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    change_request_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('limit','dependency','measure','field')),
+    element_key TEXT NOT NULL,
+    change TEXT NOT NULL CHECK (change IN ('added','removed','changed')),
+    PRIMARY KEY (change_request_id, revision, kind, element_key),
+    FOREIGN KEY (change_request_id, revision) REFERENCES v2_change_request_revisions(change_request_id, revision) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_change_request_elements_lookup ON v2_change_request_elements(ws_id, goal_id, kind, element_key);
+  CREATE UNIQUE INDEX v2_events_once_precedent ON v2_events(ws_id)
+    WHERE ws_id IS NOT NULL AND name = 'first_precedent_shown';
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
@@ -1487,11 +1506,14 @@ export function migrate() {
     for (let v = current; v < MIGRATIONS.length; v++) {
       d.exec("BEGIN IMMEDIATE");
       try {
-        d.exec(MIGRATIONS[v]);
+        const migration = MIGRATIONS[v];
+        d.exec(migration);
+        const skippedBases = /\bCREATE TABLE v2_change_request_elements\s*\(/.test(migration) ? backfillChangeElements(d) : 0;
         const broken = d.prepare("PRAGMA foreign_key_check").all();
         if (broken.length) throw new Error(`migration ${v + 1} left ${count(broken.length, "broken reference")}`);
         d.exec(`PRAGMA user_version = ${v + 1}`);
         d.exec("COMMIT");
+        if (skippedBases) console.warn(`migration ${v + 1} skipped ${count(skippedBases, "change request revision")} with missing base versions`);
       } catch (e) {
         d.exec("ROLLBACK");
         throw e;

@@ -65,7 +65,79 @@ function admin(args, dir, { script = "align-admin.mjs", preload } = {}) {
   return { status: r.status, out: r.stdout ?? "", err: r.stderr ?? "", error: r.error };
 }
 
+function testChangeElementUpgrade(name, shift) {
+  const legacyDir = path.join(testDir, name);
+  mkdirSync(path.join(legacyDir, "v2"), { recursive: true });
+  const legacy = new DatabaseSync(path.join(legacyDir, "v2/align.sqlite"));
+  try {
+    const elementMigration = migrations.findIndex((sql) => /\bv2_change_request_elements_lookup\b/.test(sql));
+    if (elementMigration < 0) throw new Error("Missing change request element migration");
+    legacy.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, elementMigration)) legacy.exec(sql);
+    legacy.exec(`
+      INSERT INTO ba_user (id) VALUES ('u_old');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_old', 'Old workspace', 'u_old', '${OLD}');
+      INSERT INTO v2_goals (id, ws_id, owner_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at)
+        VALUES ('g_old', 'ws_old', 'u_old', 'workspace', 1, 'Old title', '[]', '{}', 'active', '${OLD}', '${OLD}');
+      INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, status, content_hash, created_by, created_at)
+        VALUES ('ws_old', 'g_old', 1, 'Old title', '[{"id":"m_before","text":"Measure","target":null}]', '{}', 'active', 'old', 'u_old', '${OLD}');
+      INSERT INTO v2_change_requests (id, ws_id, goal_id, requester_id, state, revision, base_version, changes_json, reason, created_at, updated_at)
+        VALUES ('cr_old', 'ws_old', 'g_old', 'u_old', 'rejected', 2, 1, '{"title":"New title"}', 'New work', '${OLD}', '${OLD}');
+      INSERT INTO v2_change_request_revisions (ws_id, change_request_id, revision, base_version, changes_json, author_id, created_at)
+        VALUES
+          ('ws_old', 'cr_old', 1, 1, '{"measures":[{"id":"m_after","text":"Measure","target":null}],"target_share":15}', 'u_old', '${OLD}'),
+          ('ws_old', 'cr_old', 2, 1, '{"title":"New title"}', 'u_old', '${OLD}'),
+          ('ws_old', 'cr_old', 3, 2, '{"status":"dropped"}', 'u_old', '${OLD}');
+      PRAGMA user_version = ${elementMigration + shift};
+    `);
+    // Prepend an inert migration to simulate an earlier branch landing first.
+    const upgrade = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import path from "node:path";
+      import { registerHooks } from "node:module";
+      const shifted = process.argv[1] === "1";
+      registerHooks({
+        resolve(specifier, context, nextResolve) {
+          return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+        },
+        load(url, context, nextLoad) {
+          const result = nextLoad(url, context);
+          if (shifted && url.endsWith("/lib/v2/db.ts")) {
+            return { ...result, source: String(result.source).replace("const MIGRATIONS: string[] = [", '$& "SELECT 1",') };
+          }
+          if (shifted && url.endsWith("/lib/v2/core.mts")) {
+            return { ...result, source: String(result.source).replace(/export const SCHEMA_VERSION = (\\d+)/,
+              (_, version) => "export const SCHEMA_VERSION = " + (Number(version) + 1)) };
+          }
+          return result;
+        },
+      });
+      const { migrate } = await import("./lib/v2/db.ts");
+      migrate();
+    `, String(shift)], { cwd: ROOT, env: { ...process.env, ALIGN_DATA_DIR: legacyDir }, encoding: "utf8" });
+    if (upgrade.status !== 0) throw new Error(upgrade.error?.message ?? upgrade.stderr);
+    legacy.exec("PRAGMA foreign_keys = ON;");
+    const version = legacy.prepare("PRAGMA user_version").get().user_version;
+    const keys = legacy.prepare("SELECT ws_id, goal_id, revision, kind, element_key, change FROM v2_change_request_elements ORDER BY revision, element_key").all();
+    check(`LIM-2522 (${name}): backfills each revision, counts one missing base and keeps both sides of a measure replacement`,
+      elementMigration === 28 && version === SCHEMA_VERSION + shift &&
+        upgrade.stderr.includes(`migration ${elementMigration + 1 + shift} skipped 1 change request revision with missing base versions`) &&
+        keys.map((k) => Object.values(k).join(":")).join(",") ===
+        "ws_old:g_old:1:measure:m_after:added,ws_old:g_old:1:measure:m_before:removed,ws_old:g_old:2:field:title:changed" &&
+        legacy.prepare("PRAGMA foreign_key_check").all().length === 0, JSON.stringify({ version, keys, stderr: upgrade.stderr }));
+    legacy.exec("DELETE FROM v2_change_request_revisions WHERE revision = 1");
+    check(`LIM-2522 (${name}): removing a revision removes its indexed keys`,
+      legacy.prepare("SELECT revision FROM v2_change_request_elements").all().map((r) => r.revision).join() === "2");
+    const insertEvent = legacy.prepare("INSERT INTO v2_events (name, ws_id, at) VALUES ('first_precedent_shown', 'ws_old', ?) ON CONFLICT DO NOTHING");
+    check(`LIM-2522 (${name}): the database enforces one first precedent event per workspace`,
+      insertEvent.run(OLD).changes === 1 && insertEvent.run(NOW).changes === 0);
+  } finally {
+    legacy.close();
+  }
+}
+
 try {
+  testChangeElementUpgrade("schema 28 to 29", 0);
+  testChangeElementUpgrade("shifted migration", 1);
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],
     ["purge dry-run", ["workspaces", "delete", WS, "--purge", "--yes", "--dry-run"]],
