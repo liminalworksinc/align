@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Workspace owners can review the goal list from Goals or Home, defer the review, and snooze questions about
+  inactivity. The review asks about shared usage, measure readings and launch outcomes. Session owners can
+  expand earlier goal bindings on Sessions. Server migration 31 records review decisions.
+- The goal-list review requires records that establish five people before showing unbound usage. It shows
+  unknown for the rest of the period if the reviewed usage changes after a figure is shown. Links bring goal
+  controls into view, and proposal forms explain when new measures become available.
+
 - Goal owners can opt measures into CI readings or a command on a chosen machine. CI credentials can be
   revoked, and the machine runs a command only after its operator allows the exact executable and arguments.
   Readings show their source and time. Server migration 30 keeps existing hand readings.

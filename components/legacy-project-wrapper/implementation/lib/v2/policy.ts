@@ -72,6 +72,7 @@ export const GOAL_READERS: Record<Visibility, { wsRoles: readonly WsRole[]; podR
 
 export type Action =
   | WsAction
+  | "workspace.review_goals"
   | "goal.read"
   | "goal.edit"
   | "goal.record_reading"
@@ -121,6 +122,9 @@ const roleDenied = (p: PolicyPrincipal): Decision =>
 export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject): Decision {
   if (!p.wsRole) return hidden(); // not a member (or no device grant): the workspace and everything in it is hidden
   switch (action) {
+    case "workspace.review_goals":
+      return p.wsRole === "owner" ? ALLOW : hidden();
+
     case "workspace.read":
     case "workspace.manage":
     case "session.share":

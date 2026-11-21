@@ -5,6 +5,7 @@ import { listAsks } from "./asks";
 import { changeRequestGroups } from "./changes";
 import { all } from "./db";
 import { dueExpectations } from "./expectations";
+import { goalListReviewDue } from "./goal-list-review";
 import { goalRow, visibleGoals } from "./goals";
 import { alignmentWaits, appEvidence, changeWaits, launchWaits, type EvidenceClass, type HomeNext, type HomePerson } from "./home-core.mts";
 import type { PolicyPrincipal } from "./policy";
@@ -233,8 +234,9 @@ export function workspaceHome(pp: PolicyPrincipal) {
   }));
 
   const outcomes = section(() => ({ waiting_on_me: dueExpectations(pp) }));
+  const goal_list_review_due = active_goals === null ? null : active_goals.length > 0 && section(() => goalListReviewDue(pp));
   const budget_requests = section(() => homeBudgetRequests(pp));
-  return { me, change_requests, asks, alignments, budget_requests, budget_crossings: section(() => homeBudgetCrossings(pp)), goals: active_goals, apps, outcomes };
+  return { me, change_requests, asks, alignments, budget_requests, budget_crossings: section(() => homeBudgetCrossings(pp)), goals: active_goals, apps, outcomes, goal_list_review_due };
 }
 
 export type WorkspaceHome = ReturnType<typeof workspaceHome>;

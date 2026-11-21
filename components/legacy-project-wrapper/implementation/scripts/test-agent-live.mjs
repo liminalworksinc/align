@@ -515,6 +515,13 @@ try {
     usage2 === 2 && dbFilesLack(dbFile, DRIFT_CANARY) && dbFilesLack(dbFile, "on the 31st") && dbFilesLack(dbFile, "synthetic prompt"),
     `${usage2}`,
   );
+  const listReview = await ws(O, "GET", "/goal-list-review");
+  const markedReview = await ws(O, "POST", "/goal-list-review", { action: "reviewed", period_end: listReview.json?.period_end });
+  const defaultPrivate = [DRIFT_CANARY, REPLY, "synthetic prompt"];
+  check("LIM-2525: default review and completion keep local transcript canaries out of responses and server storage",
+    listReview.status === 200 && listReview.json?.unbound_share === null && markedReview.json?.reviewed_at &&
+    defaultPrivate.every((value) => !JSON.stringify([listReview.json, markedReview.json]).includes(value) && dbFilesLack(dbFile, value)) &&
+    sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, SKEY).n) === usage2);
 
   // ======== two sessions in one repo (A1-local-1, A1-local-3): a refused edit never goes up, whoever changes its file
   // later; the session that read the file hears which session changed it ========

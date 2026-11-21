@@ -57,6 +57,7 @@ The events, where they are recorded and what they may carry:
 | `first_reading` | the workspace's first measure reading | the workspace, the responsible person | none |
 | `measure_source_reading` | an automated measure reading is recorded | the workspace, the responsible person | `source`: `ci` or `command` |
 | `first_precedent_shown` | a precedent read first returns at least one item to the requester or a person who can decide, including a draft read by its proposer | the workspace, the person | none |
+| `goal_list_reviewed` | an owner marks their review for the month complete | the workspace, the owner | none |
 | `first_directive` | the workspace's first directive that reached a session | the workspace, none | `kind` |
 | `first_mcp_read` | the workspace's first MCP tool call | the workspace, the person | `client`: `app` or `device` |
 | `loi_sent` | the operator records it | the workspace, none | `note_ref` |
@@ -100,6 +101,11 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 - **WHEN** a viewer without a decision role reads matches, a requester reads an empty result, and then a requester
   or a current approver reads matches several times
 - **THEN** only the first eligible read with matches records `first_precedent_shown`, once in the workspace and without props
+
+#### Scenario: A goal-list review counts once
+
+- **WHEN** an owner opens or defers their review, then marks it reviewed twice for the same month
+- **THEN** only the first completion writes `goal_list_reviewed`, with no question, goal, date range or usage props
 
 #### Scenario: Sample workspace
 

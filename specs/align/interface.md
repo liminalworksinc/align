@@ -1010,6 +1010,37 @@ and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v
 - **WHEN** a workspace owner chooses Level "Company goal"
 - **THEN** the Team field is hidden, visibility is fixed to "Everyone in the workspace", and the page posts `{level:"company", visibility:"workspace", …}` with no `team_id`; members and viewers are not offered the Level choice
 
+### Requirement: Goal-list review on Goals and Home
+
+The Goals tab SHALL offer workspace owners a "Review the goal list" section. When a review is due and the owner sees
+an active goal, Home SHALL offer a quiet link outside the Needs you count. The review SHALL send no alert and stay
+available on Goals when deferred or completed. Show the UTC month used for usage. Each question SHALL say why it came up and link to
+the existing flow as appropriate. Use the goal page's **Propose a change** or **Save a new version**, the
+existing **Hold agents** controls, and the **Drop this goal** confirmation for an owner who owns the goal.
+An owner who cannot drop a goal can propose changing its status. An expectation question can link to its decision
+record. A date-only deadline SHALL use the person's readable date format without shifting the UTC calendar date.
+Goals that lack usage or a measure reading SHALL use unknown wording. When creating a goal or saving a version,
+goal authoring SHALL indicate where to add a reading after saving a new measure. The full proposal and counter editors
+SHALL explain that new measures become available after launch. The live goal SHALL offer the reading control to
+eligible readers once the measure exists.
+The review SHALL offer **Remind me in a week**, **Mark reviewed**, and **Snooze for a week** on inactivity questions.
+It SHALL fit at 390 px.
+
+#### Scenario: An owner reviews the list on a phone
+
+- **WHEN** an owner follows the Home link at 390 px and reads the questions or defers the review
+- **THEN** questions and actions fit, each existing action opens its existing flow, and deferring shows the return date and clears the Home link
+
+#### Scenario: The goal page loads after following a review link
+
+- **WHEN** an owner follows **Save a new version**, **Hold agents** or another goal-section link from the review
+- **THEN** the goal page brings the corresponding section into view when it renders
+
+#### Scenario: A proposal adds a measure
+
+- **WHEN** a person proposes a new measure and sends it for approval
+- **THEN** the editor explains that the measure becomes available after launch, and the live goal offers a reading for it only once the change is launched
+
 ### Requirement: Limits from pasted meeting notes
 
 The Goals tab and the goal page's "Limits" card SHALL give everyone but viewers **Paste meeting notes**, which sends
@@ -1573,6 +1604,11 @@ Own session rows SHALL include nullable `team_budget_label`: a sentence naming t
 
 - **WHEN** a member opens the tab
 - **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "Receipt" once the machine sent any receipt for it and "Not observed" before, the goal it counts under and follows (for a session no longer shared, "Sharing stopped <time>, so nothing more counts" or "Sharing ended <time>, …" for an ended one, never "Counting under: no goal"), and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+
+#### Scenario: Earlier bindings
+
+- **WHEN** someone expands "Earlier bindings" for a session they shared
+- **THEN** the list shows closed bindings newest first, with each goal or "No goal", the recorded origin or "Unknown", and when the binding started and ended. A goal they cannot read is unnamed. The workspace owner's list of other people's sessions has no earlier bindings
 
 #### Scenario: A session whose device signed out
 

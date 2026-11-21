@@ -30,6 +30,44 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [x] LIM-2525: Help workspace owners review the goal list
+
+- **Priority:** P0
+- **Owner:** Align goals, Home, Sessions and product metrics
+- **Direction:** Review the goal list periodically from existing workspace records and show earlier bindings on the Sessions page.
+- **Conclusion:** Use readable records, a workspace aggregate when the proposed minimum is met, and the existing goal action flows. Review actions record an owner decision without changing any goal.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify review signals, visibility, state and binding history before changing code.
+  - [x] Implement owner review and binding history with migration 31 and the existing action flows.
+  - [x] Address the independent review's findings on aggregate privacy, target comparisons, write protection, legacy samples and goal page flows.
+- **Evidence:**
+  - [x] Cover review signals, privacy, lifecycle, migration and narrow browser layouts.
+    The 17 packet checks passed in the production-server suite, including Chrome at 390 and 1280 pixels.
+    The admin suite passed its migration and renumbering cases.
+  - [x] Run both clean installs, the full Node 24 gate and spec validation. Record the outcome in the changelog.
+    Both clean installs succeeded. `ALIGN_TEST_PORT=4800 npm test` on Node 24.22.3 passed 2,095 checks with zero failures.
+    `litai spec validate specs/align --id-prefix align` accepted all eight documents. The retained test receipt is stale.
+  - [x] Reproduce the review findings with regression tests, rerun the Node 24 gate and validate the revised spec.
+    The fix pass added browser, API and migration regressions. On Node 24.22.3, both clean installs succeeded and
+    `ALIGN_TEST_PORT=4800 npm test` passed 2,116 checks with zero failures. The spec validator accepted all eight
+    documents. The retained test receipt is stale.
+  - [x] Rebased on LIM-2524 before the budget merge. The prior-schema upgrade kept its readings and credential
+    intact, and a fresh database passed. The isolated Node 24.22.3 gate passed 2,166 checks at port 4800,
+    including the synchronized proposal form check and hook latency. All eight specification documents passed.
+
+- **Merge verification:** Node 26.3.0: the first 30 migration SQL strings and their source prefix match the lower
+  branch exactly. Migration 31 is the unchanged goal-list review SQL. The local package database matches both
+  branches. Home keeps budget requests, budget crossings and the review link; Sessions keeps budget labels and
+  earlier bindings. Goal links retain section scrolling, form focus and the existing drop confirmation.
+  Lint passes with one existing unused-variable warning. Route type generation, app typecheck, package typecheck
+  and package build pass. Budget checks pass 69/0, admin checks pass 77/0, and 393 listener-free package checks pass
+  with zero failures. Two package cases that create git commits in fixtures were excluded. Both latency cases skip
+  because bare process startup exceeds the host-load cutoff. All five script syntax checks pass. Both dependency
+  directories were already present. No conflict markers or whitespace errors remain. Listener-dependent execution
+  remains unverified. The index and history remain untouched.
+
 ### [x] LIM-2524 - Read measures from CI and a chosen machine
 
 - **Priority:** P0

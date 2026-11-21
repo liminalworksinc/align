@@ -223,7 +223,7 @@ export function ChangesForm({
       <Field label="Goal">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
       </Field>
-      <MeasuresEditor value={measures} onChange={setMeasures} />
+      <MeasuresEditor value={measures} onChange={setMeasures} liveMeasures={goal.measures} />
       <LimitEditor value={limits} onChange={setLimits} />
       <Field label="Status">
         <Select value={status} onChange={(e) => setStatus(e.target.value as Goal["status"])}>

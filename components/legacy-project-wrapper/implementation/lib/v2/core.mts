@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 30;
+export const SCHEMA_VERSION = 31;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -127,6 +127,7 @@ export const EVENT_PROPS = {
   first_reading: {},
   measure_source_reading: { source: ["ci", "command"] },
   first_precedent_shown: {},
+  goal_list_reviewed: {},
 } as const satisfies Record<string, Record<string, PropRule>>;
 export type EventName = keyof typeof EVENT_PROPS;
 export type EventProps = Record<string, string | number>;

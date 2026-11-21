@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { api, Btn, Err, Field, Input, Loading, Note, Pill, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
+import { api, Btn, Err, Field, Input, Loading, Note, Pill, scrollToLinkedSection, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
 import { Panel } from "./ds";
 import type { Me } from "./server";
 import type { Goal } from "./types";
@@ -303,7 +303,7 @@ export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; 
   if (!data) return null;
   if (!data.can_send && !data.hold.can_hold && !data.requests.length) return null;
   return (
-    <section id="agents-on-goal">
+    <section id="agents-on-goal" ref={scrollToLinkedSection}>
       <Panel className="mb-4" title="Agents on this goal">
         <HoldControls ws={ws} goal={goal} me={me} hold={data.hold} quiet={!data.sessions?.length} onDone={reload} />
         {data.can_send && <SendRequest ws={ws} goal={goal} data={data} onDone={d.reload} />}

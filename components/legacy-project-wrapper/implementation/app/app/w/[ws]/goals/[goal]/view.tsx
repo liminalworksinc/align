@@ -3,7 +3,7 @@ import { OutcomePeriods } from "../../../../_ui/outcome-periods";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
+import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, scrollToLinkedSection, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
 import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, hasUnlabelledSource, limitsDraft, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
@@ -49,14 +49,14 @@ function DropGoal({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => 
   if (dropped) return null;
   if (!asking)
     return (
-      <div className="mb-5">
+      <div id="drop-goal" ref={scrollToLinkedSection} className="mb-5">
         <Btn kind="secondary" onClick={() => setAsking(true)}>
           Drop this goal
         </Btn>
       </div>
     );
   return (
-    <div role="region" aria-label="Drop this goal" data-drop-goal className="mb-5 flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-raised) p-3 text-[15px]">
+    <div id="drop-goal" role="region" aria-label="Drop this goal" data-drop-goal className="mb-5 flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-raised) p-3 text-[15px]">
       <p className="font-semibold text-(--text-1)">Drop “{goal.title}”?</p>
       <p className="text-(--text-2)">
         It becomes version {goal.version + 1}, marked dropped. Sessions bound to it get that at their next turn, nobody can bind new sessions to it, and people can no longer ask to change it. To bring it back, save a new
@@ -474,6 +474,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             <span className="text-[14px] text-zinc-500">Owner: {g.owner.id === me.id ? "you" : g.owner.name}</span>
           </div>
           {d.data!.can_edit && g.status === "active" && <EditThisGoal />}
+          <section id="goal-measures" ref={scrollToLinkedSection}>
           <Card title="Measures">
             {g.measures.length === 0 && <Note>No measures.</Note>}
             <ul className="list-disc pl-5 text-[15px]">
@@ -493,6 +494,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             )}
             {d.data!.contributions.length > 0 && <p className="mt-3 text-[14px] text-zinc-500">Contributing goals: {d.data!.contributions.map((c) => c.goal!.title).join(", ")}</p>}
           </Card>
+          </section>
           <OutcomePeriods ws={ws} me={me.id} goal={g.id} />
           <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />

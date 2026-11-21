@@ -188,6 +188,21 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                 {s.last_epoch && `Last binding: ${epochOriginLabel(s.last_epoch.origin)}. `}
                 {count(s.usage.requests, "request", undefined, num)}, {num(s.usage.input + s.usage.output)} input and output tokens.
               </p>
+              {s.earlier_bindings.length > 0 && (
+                <details className="mt-2 text-[14px] text-(--text-2)">
+                  <summary className="min-h-[44px] cursor-pointer content-center font-medium text-(--text-1)">Earlier bindings</summary>
+                  <ul className="space-y-2 border-l border-(--line) pl-3 [overflow-wrap:anywhere]">
+                    {s.earlier_bindings.map((b, index) => (
+                      <li key={index}>
+                        <p className="text-(--text-1)">{b.goal ? goalText(b.goal) : "No goal"}</p>
+                        <p>{b.origin ? epochOriginLabel(b.origin) : "Origin unknown"}</p>
+                        <p>Started <time dateTime={b.starts_at}>{when(b.starts_at)}</time></p>
+                        <p>Ended <time dateTime={b.ends_at}>{when(b.ends_at)}</time></p>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               {s.state === "suspended" && <Note>The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads.</Note>}
               {s.team_budget_label && <p className="my-2 text-[14px] text-(--text-2)">{s.team_budget_label}</p>}
               {s.ended_reason === "device_signed_out" && (

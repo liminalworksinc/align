@@ -34,6 +34,7 @@ export interface WsDetail {
   workspace: { id: string; name: string; steering: "off" | "on" };
   role: "owner" | "member" | "viewer";
   me: string;
+  can_review_goals: boolean;
   members: { id: string; name: string; email: string; role: "owner" | "member" | "viewer" }[];
   teams: { id: string; name: string; my_role: "lead" | "member" | null; members: { id: string; name: string; role: "lead" | "member" }[] }[];
 }
@@ -68,6 +69,7 @@ export interface MySession {
   device: { id: string; name: string; signed_out: boolean; has_workspace: boolean } | null;
   current_epoch: { epoch_id: string; goal_id: string | null; starts_at: string; goal: GoalLabel | null; origin: EpochOrigin | null } | null;
   last_epoch: { origin: EpochOrigin | null } | null;
+  earlier_bindings: { goal: GoalLabel | null; origin: EpochOrigin | null; starts_at: string; ends_at: string }[];
   governing_goal: GoalLabel | null;
   agent_stopped: boolean;
   stop_status: StopStatus | null;

@@ -37,6 +37,43 @@ export function latestMeasureReadings(ws: string, goal: string, measures: Measur
   return Object.fromEntries(measures.map(({ id }) => [id, get<ReadingRow>(`${MEASURE_READINGS} ORDER BY ${READING_ORDER} LIMIT 1`, ws, goal, id)]));
 }
 
+type ReviewValue = Pick<ReadingRow, "value_text" | "value_num">;
+
+function reviewValue({ value_text, value_num }: ReviewValue) {
+  const exact = value_text === null ? null : decimalText(value_text.trim());
+  return exact ?? (value_num === null ? null : String(value_num));
+}
+
+export function measureReview(ws: string, goal: string, measure: string, at: string, since: string) {
+  const latest = get<ReviewValue & Pick<ReadingRow, "source" | "stale_after" | "observed_at">>(
+    `SELECT value_text, value_num, source, stale_after, observed_at FROM v2_measure_readings
+     WHERE ws_id = ? AND goal_id = ? AND measure_id = ? AND observed_at <= ?
+     ORDER BY ${READING_ORDER} LIMIT 1`, ws, goal, measure, at,
+  );
+  if (!latest) return { kind: "missing" } as const;
+  const { source, observed_at: last_at, stale_after } = latest;
+  if (stale_after && stale_after <= at) return { kind: "stale", source, last_at } as const;
+  const value = reviewValue(latest);
+  if (value === null) return { kind: "no_number", source } as const;
+  if (last_at <= since) return { kind: "no_recent_reading", source, last_at } as const;
+
+  // Pick one recording per observation date, using the same precedence as the latest reading.
+  const baseline = get<ReviewValue>(
+    `SELECT value_text, value_num FROM v2_measure_readings
+     WHERE ws_id = ? AND goal_id = ? AND measure_id = ? AND observed_at <= ?
+     ORDER BY ${READING_ORDER} LIMIT 1`, ws, goal, measure, since,
+  );
+  if (!baseline || reviewValue(baseline) !== value) return null;
+  const recent = all<ReviewValue>(
+    `SELECT DISTINCT value_text, value_num FROM (
+       SELECT value_text, value_num, ROW_NUMBER() OVER (PARTITION BY observed_at ORDER BY recorded_at DESC, rowid DESC) AS rank
+       FROM v2_measure_readings
+       WHERE ws_id = ? AND goal_id = ? AND measure_id = ? AND observed_at > ? AND observed_at <= ?
+     ) WHERE rank = 1`, ws, goal, measure, since, at,
+  );
+  return recent.some((reading) => reviewValue(reading) !== value) ? null : { kind: "unchanged", source } as const;
+}
+
 export function readingView(r: ReadingRow) {
   const { source_ref, ...row } = r;
   const base = { ...row, stale: !!row.stale_after && row.stale_after <= nowIso(), recorded_by: { id: r.recorded_by, name: memberName(r.recorded_by) } };

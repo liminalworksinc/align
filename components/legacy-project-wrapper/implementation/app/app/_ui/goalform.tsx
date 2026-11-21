@@ -31,14 +31,21 @@ export const measuresOut = (m: MeasureDraft[], configureSource = false) =>
 export const anchorsOut = (a: AnchorDraft) => ({ repos: listOf(a.repos), branch_patterns: listOf(a.branch_patterns), issues: listOf(a.issues) });
 
 /** `keepOne`: the New goal form never offers to remove its only measure row (founder ruling, PR 68 pass 1 item 19). */
-export function MeasuresEditor({ value, onChange, keepOne = false, configureSource = false, showLabelErrors = false }: {
+export function MeasuresEditor({ value, onChange, keepOne = false, configureSource = false, showLabelErrors = false, liveMeasures }: {
   value: MeasureDraft[]; onChange: (v: MeasureDraft[]) => void; keepOne?: boolean; configureSource?: boolean; showLabelErrors?: boolean;
+  liveMeasures?: Goal["measures"];
 }) {
   const removable = !keepOne || value.length > 1;
   const errorId = useId();
   return (
     <div className="mb-3">
       <span className="mb-1 block text-[14px] text-(--text-2)">Measures</span>
+      {value.some((m) => !isBlankText(m.text) && (!m.id || (liveMeasures && !liveMeasures.some(({ id }) => id === m.id)))) && (
+        <p className="mb-2 text-[14px] text-(--text-2)">
+          {liveMeasures ? "New measures become available after launch." :
+            "Reading unknown for new measures. Add a dated reading on the goal page after saving."}
+        </p>
+      )}
       {value.map((m, i) => {
         const label = `Measure ${i + 1}`;
         const error = configureSource && showLabelErrors && missingMeasureLabel(m);

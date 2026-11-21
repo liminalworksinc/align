@@ -8,6 +8,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runInNewContext } from "node:vm";
 import { SCHEMA_VERSION } from "../lib/v2/core.mts";
+import { runRetention } from "../lib/v2/retention-core.mts";
 
 const ROOT = process.cwd();
 const NOW = "2026-11-13T12:00:00.000Z";
@@ -93,7 +94,7 @@ function migrateFixture(dir, shift = 0) {
 }
 
 function testReadingUpgrade() {
-  const dir = path.join(testDir, "schema 29 to 30");
+  const dir = path.join(testDir, "schema 29 to 31");
   mkdirSync(path.join(dir, "v2"), { recursive: true });
   const d = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
   try {
@@ -113,7 +114,7 @@ function testReadingUpgrade() {
     d.exec("PRAGMA foreign_keys = ON;");
     const rows = d.prepare("SELECT id, value_num, source, source_ref, goal_version FROM v2_measure_readings ORDER BY rowid DESC").all();
     const version = d.prepare("PRAGMA user_version").get().user_version;
-    check("LIM-2524: a schema 29 database upgrades to 30", version === 30, version);
+    check("LIM-2524: a schema 29 database upgrades through 30 to 31", version === 31, version);
     check("LIM-2524: migration 30 preserves legacy reading order and keeps unknown source details and version",
       rows.map((r) => r.id).join() === "mr_later,mr_one" && rows[0].value_num === 2 &&
       rows.every((r) => r.source === "self" && r.source_ref === null && r.goal_version === null) &&
@@ -168,6 +169,10 @@ function testChangeElementUpgrade(name, shift) {
     const insertEvent = legacy.prepare("INSERT INTO v2_events (name, ws_id, at) VALUES ('first_precedent_shown', 'ws_old', ?) ON CONFLICT DO NOTHING");
     check(`LIM-2522 (${name}): the database enforces one first precedent event per workspace`,
       insertEvent.run(OLD).changes === 1 && insertEvent.run(NOW).changes === 0);
+    check(`LIM-2525 (${name}): review migration follows the prior migration even when shifted and starts existing workspaces with empty review state`,
+      legacy.prepare("SELECT is_sample FROM v2_workspaces WHERE id = 'ws_old'").get().is_sample === null &&
+      legacy.prepare("SELECT COUNT(*) AS n FROM v2_goal_list_reviews").get().n === 0 &&
+      legacy.prepare("SELECT COUNT(*) AS n FROM v2_goal_list_snoozes").get().n === 0);
   } finally {
     legacy.close();
   }
@@ -177,6 +182,53 @@ try {
   testReadingUpgrade();
   testChangeElementUpgrade("schema 28 to 29", 0);
   testChangeElementUpgrade("shifted migration", 1);
+  const reviewDir = path.join(testDir, "schema 30 to 31");
+  mkdirSync(path.join(reviewDir, "v2"), { recursive: true });
+  const reviewUpgrade = new DatabaseSync(path.join(reviewDir, "v2/align.sqlite"));
+  try {
+    reviewUpgrade.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, 30)) reviewUpgrade.exec(sql);
+    reviewUpgrade.exec(`
+      INSERT INTO ba_user (id) VALUES ('u_old');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_renamed', 'Renamed space', 'u_old', '${OLD}');
+      INSERT INTO v2_events (name, ws_id, at, props) VALUES ('workspace_created', 'ws_renamed', '${OLD}', '{"kind":"sample"}');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES
+        ('ws_expired_sample', 'Renamed older space', 'u_old', '2025-06-01T12:00:00.000Z'), ('ws_blank', 'Sample workspace', 'u_old', '${OLD}');
+      INSERT INTO v2_events (name, ws_id, at, props) VALUES
+        ('workspace_created', 'ws_expired_sample', '2025-06-01T12:00:00.000Z', '{"kind":"sample"}'),
+        ('workspace_created', 'ws_blank', '${OLD}', '{"kind":"blank"}');
+      INSERT INTO v2_goals (id, ws_id, owner_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at)
+        VALUES ('g_sample', 'ws_expired_sample', 'u_old', 'workspace', 1, 'Sample fixture goal', '[]', '{}', 'active', '${OLD}', '${OLD}');
+      INSERT INTO v2_measure_readings (id, ws_id, goal_id, measure_id, value_text, source, source_ref, goal_version, stale_after, observed_at, recorded_by, recorded_at)
+        VALUES ('mr_ci', 'ws_expired_sample', 'g_sample', 'm_sample', '9007199254740993', 'ci', '{"run":"7"}', 1, '${NOW}', '${OLD}', 'u_old', '${OLD}'),
+               ('mr_command', 'ws_expired_sample', 'g_sample', 'm_sample', NULL, 'command', '{"exit_status":7}', 1, NULL, '${OLD}', 'u_old', '${OLD}');
+      PRAGMA user_version = 30;
+    `);
+    const legacyDb = {
+      all: (sql, ...args) => reviewUpgrade.prepare(sql).all(...args),
+      get: (sql, ...args) => reviewUpgrade.prepare(sql).get(...args),
+      run: (sql, ...args) => Number(reviewUpgrade.prepare(sql).run(...args).changes),
+    };
+    await runRetention(legacyDb, (fn) => fn(), new Date(NOW), { secret: "test-data-only-admin-secret" });
+    check("LIM-2525: schema 30 retention expires the older sample's creation event",
+      !legacyDb.get("SELECT 1 FROM v2_events WHERE ws_id = 'ws_expired_sample'"));
+    migrateFixture(reviewDir);
+    check("LIM-2525 (schema 30 to 31): backfill preserves a renamed sample's exclusion from the review",
+      reviewUpgrade.prepare("SELECT name, is_sample FROM v2_workspaces WHERE id = 'ws_renamed'").get().is_sample === 1);
+    check("LIM-2525 (schema 30 to 31): unknown legacy type is ineligible, a recorded blank stays eligible, and sample goals survive",
+      legacyDb.get("SELECT is_sample FROM v2_workspaces WHERE id = 'ws_expired_sample'").is_sample === null &&
+      legacyDb.get("SELECT is_sample FROM v2_workspaces WHERE id = 'ws_blank'").is_sample === 0 &&
+      legacyDb.get("SELECT title FROM v2_goals WHERE id = 'g_sample'").title === "Sample fixture goal");
+    const ci = legacyDb.get("SELECT value_text, source, source_ref, stale_after FROM v2_measure_readings WHERE id = 'mr_ci'");
+    const command = legacyDb.get("SELECT value_text, source, source_ref FROM v2_measure_readings WHERE id = 'mr_command'");
+    check("LIM-2525 (schema 30 to 31): upgrade keeps automated readings with clean foreign keys",
+      legacyDb.get("PRAGMA user_version").user_version === 31 &&
+      ci?.value_text === "9007199254740993" && ci.source === "ci" && JSON.parse(ci.source_ref).run === "7" && ci.stale_after === NOW &&
+      command?.value_text === null && command.source === "command" && JSON.parse(command.source_ref).exit_status === 7 &&
+      legacyDb.all("PRAGMA foreign_key_check").length === 0);
+  } finally {
+    reviewUpgrade.close();
+  }
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],
     ["purge dry-run", ["workspaces", "delete", WS, "--purge", "--yes", "--dry-run"]],

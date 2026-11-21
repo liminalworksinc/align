@@ -1,6 +1,7 @@
 "use client";
 import type { ExpectationView } from "@/lib/v2/expectations";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { NextAfterDecision, type NextItem } from "../../_ui/ds";
 import GoalLines from "../../_ui/home/goal-lines";
@@ -50,13 +51,14 @@ interface HomeData {
   budget_crossings: SinceBudgetCrossing[] | null;
   goals: HomeGoal[] | null;
   apps: { everyone: boolean; items: App[] } | null;
+  goal_list_review_due: boolean | null;
 }
 interface Groups {
   waiting_on_me: ChangeRequest[];
   mine: ChangeRequest[];
   others: ChangeRequest[];
 }
-const UNREAD: HomeData = { goals: null, apps: null, budget_requests: null, budget_crossings: null };
+const UNREAD: HomeData = { goals: null, apps: null, goal_list_review_due: null, budget_requests: null, budget_crossings: null };
 /** The page's heading, from NeedsList: its Needs-you count (null while reading, or when nothing is readable); `partial`
  *  when some source couldn't be read, so the count is a lower bound and zero is never claimed. */
 function needsHeading(n: number | null, partial: boolean) {
@@ -169,6 +171,11 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
         <div className={quietList ? "hidden" : "contents"}>
           <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={reloadToken} onItems={setItems} decided={decided} onOutcomeReported={reloadAll} />
         </div>
+        {h?.goal_list_review_due && (
+          <Link href={`/app/w/${ws}/goals?review=1#goal-list-review`} className="inline-flex min-h-[44px] w-fit items-center text-[15px] font-medium text-(--accent-text) underline underline-offset-2">
+            Review the goal list
+          </Link>
+        )}
 
         {!h ? (
           <Loading />
