@@ -22,6 +22,9 @@ const NOT_AN_ACTION = new Set([
 
 const isStr = (v: unknown): v is string => typeof v === "string";
 
+// A recommendation aimed at the person's own feedback habits rather than the agent (spec §2.6: last resort only).
+const FEEDBACK_COACHING = /\b(when you (correct|give feedback|ask for changes)|your (corrections|feedback)|say what was wrong|label (your|each) (correction|change)|note (which|what) (part|was wrong))\b/i;
+
 /** True when `text` carries a number of its own: a digit outside a placeholder or a known run id, or a number word. */
 function carriesNumber(text: string, runIds: Set<string>): boolean {
   const stripped = text
@@ -50,6 +53,8 @@ export function shapeFailures(d: unknown): string[] {
   else {
     if (t.exact_text !== undefined && t.exact_text !== null && !isStr(t.exact_text)) f.push("try_this.exact_text must be a string or null");
     if (t.category !== null && !isStr(t.category)) f.push("try_this.category must be a string or null");
+    if (!["top_category", "caught", "none"].includes(t.addresses as string)) f.push("try_this.addresses must be top_category, caught or none");
+    if (t.finding !== null && !Number.isInteger(t.finding)) f.push("try_this.finding must be a finding index or null");
   }
   if (!Array.isArray(x.cannot_tell) || !(x.cannot_tell as unknown[]).every(isStr)) f.push("cannot_tell must be a list of strings");
   if (!isStr(x.how_you_will_know)) f.push("how_you_will_know must be a string");
@@ -96,13 +101,27 @@ export function verifyDraft(draft: Draft, runs: Run[], n: Numbers): Verdict {
     }
   });
 
-  // R3: the recommendation addresses the largest time cost; with no dominant category it names none.
+  // R3 (spec §2.6, proposed Nov 24, pending founder confirmation), in order:
+  // (a) a category holding at least 40% of changes; (b) otherwise the caught_by_person finding with the most runs,
+  // since an error a person had to catch outranks diffuse rework; (c) otherwise no single change stands out.
+  const t = draft.try_this;
+  const caught = draft.why.map((w, i) => ({ w, i })).filter(({ w }) => w.kind === "caught_by_person");
+  const mostRuns = Math.max(0, ...caught.map(({ w }) => w.runs.length));
   if (n.dominant && n.top) {
-    if (draft.try_this.category !== n.top.category) failures.push(`R3: try_this must address ${n.top.category}, the largest category`);
+    if (t.addresses !== "top_category") failures.push(`R3: ${n.top.category} holds at least 40% of changes, so try_this must address it (addresses top_category)`);
+    if (t.category !== n.top.category) failures.push(`R3: try_this must address ${n.top.category}, the largest category`);
     if (!draft.why.some((w) => w.kind === "costs_time" && w.category === n.top!.category)) failures.push(`R3: no costs_time finding for ${n.top.category}`);
-  } else if (draft.try_this.category !== null) {
-    failures.push("R3: no category clearly leads, so try_this must not single one out (category null)");
+  } else if (caught.length) {
+    if (t.addresses !== "caught") failures.push("R3: no category holds 40% of changes, so try_this must address the caught_by_person finding with the most runs (addresses caught)");
+    else if (t.finding === null || draft.why[t.finding]?.kind !== "caught_by_person" || draft.why[t.finding].runs.length !== mostRuns)
+      failures.push("R3: try_this.finding must point to the caught_by_person finding with the most runs");
+    if (t.category !== null) failures.push("R3: try_this.category must be null when it addresses a caught finding");
+  } else {
+    if (t.addresses !== "none") failures.push("R3: nothing leads and nothing was caught, so try_this.addresses must be none");
+    if (t.category !== null) failures.push("R3: no category clearly leads, so try_this must not single one out (category null)");
   }
+  // Coaching the person's feedback is the last resort, never while (a) or (b) applies.
+  if (t.addresses !== "none" && FEEDBACK_COACHING.test(t.text)) failures.push("R3: try_this asks the person to change how they give feedback while a change to the agent is available");
 
   // R4: the first line is an action, not a restatement.
   const first = draft.try_this.text.trim().split(/(?<=[.!?])\s/)[0] ?? "";

@@ -48,7 +48,10 @@ export interface Finding {
 export interface Draft {
   purpose: string;
   why: Finding[];
-  try_this: { text: string; exact_text?: string | null; category: string | null };
+  /** What the recommendation addresses (spec §2.6 R3, proposed Nov 24, pending founder confirmation):
+   *  "top_category" when one category holds at least 40% of changes; otherwise "caught", the caught_by_person finding
+   *  (index in `why`) with the most runs; otherwise "none". */
+  try_this: { text: string; exact_text?: string | null; category: string | null; addresses: "top_category" | "caught" | "none"; finding: number | null };
   cannot_tell: string[];
   how_you_will_know: string;
 }

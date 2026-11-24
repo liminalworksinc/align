@@ -28,15 +28,18 @@ export interface Numbers {
   totalChanges: number;
   /** Median changes per run, to one decimal. */
   medianChanges: number;
-  /** Sum of every run's minutes (abandoned runs included) over the runs that were used. Null when no run has minutes or
-   *  none was used. An estimate from the person or the agent (R5). */
+  /** Average minutes per run over the runs that state minutes. Null when none does. An estimate (R5). */
+  minutesPerRun: number | null;
+  /** Sum of every run's minutes (abandoned runs included) over the runs that were used. Only when every run says
+   *  whether it was used; otherwise null, with the reason in `minutesPerUsedRunMissing` (spec §2.6). */
   minutesPerUsedRun: number | null;
+  minutesPerUsedRunMissing: string | null;
   runsWithMinutes: number;
   categories: CategoryCount[];
   top: CategoryCount | null;
   /** Top category's share of all changes, whole percent. Null for thin evidence (3 to 5 runs) or no changes. */
   topSharePercent: number | null;
-  /** True when one category clearly leads: at least 40% of changes and 1.5 times the next. */
+  /** True when one category holds at least 40% of all changes (spec §2.6 R3 (a)). */
   dominant: boolean;
   thin: boolean;
   table: RunRow[];
@@ -88,16 +91,25 @@ export function computeNumbers(runs: Run[]): Numbers {
   const withMinutes = runs.filter((r) => r.minutes !== null);
   const totalMinutes = withMinutes.reduce((n, r) => n + (r.minutes ?? 0), 0);
   const top = categories[0] ?? null;
-  const second = categories[1]?.count ?? 0;
-  const dominant = !!top && totalChanges > 0 && top.count / totalChanges >= 0.4 && top.count >= 1.5 * second;
+  // A tie for the top place is not a leader.
+  const tied = !!top && (categories[1]?.count ?? -1) === top.count;
+  const dominant = !!top && !tied && totalChanges > 0 && top.count / totalChanges >= 0.4;
+  const runsUnknown = runs.filter((r) => r.used === "unknown").length;
+  const minutesPerUsedRunMissing = !withMinutes.length
+    ? "No run says how many minutes it took."
+    : runsUnknown
+      ? `${runsUnknown} of ${runs.length} runs do not say whether the result was used.`
+      : !runsUsed ? "No run's result was used." : null;
   return {
     runs: runs.length,
     runsUsed,
     runsNotUsed: runs.filter((r) => r.used === "no").length,
-    runsUnknown: runs.filter((r) => r.used === "unknown").length,
+    runsUnknown,
     totalChanges,
     medianChanges: round1(median(runs.map((r) => r.changes.length))),
-    minutesPerUsedRun: withMinutes.length && runsUsed ? round1(totalMinutes / runsUsed) : null,
+    minutesPerRun: withMinutes.length ? round1(totalMinutes / withMinutes.length) : null,
+    minutesPerUsedRun: minutesPerUsedRunMissing ? null : round1(totalMinutes / runsUsed),
+    minutesPerUsedRunMissing,
     runsWithMinutes: withMinutes.length,
     categories,
     top,
@@ -116,11 +128,13 @@ export function placeholders(n: Numbers): Record<string, string | null> {
     runs_not_used: String(n.runsNotUsed),
     total_changes: String(n.totalChanges),
     median_changes: String(n.medianChanges),
-    minutes_per_used_run: n.minutesPerUsedRun === null ? null : String(n.minutesPerUsedRun),
+    minutes_per_run: n.minutesPerRun === null ? null : `${n.minutesPerRun} minutes per run`,
+    minutes_per_used_run: n.minutesPerUsedRun === null ? null : `${n.minutesPerUsedRun} minutes per used run`,
     top_category: n.top?.category ?? null,
     top_count: n.top ? String(n.top.count) : null,
     top_runs: n.top ? String(n.top.runs.length) : null,
-    top_share: n.topSharePercent === null ? null : `${n.topSharePercent}%`,
+    // Never a bare percentage: it always says what it is a share of (spec §2.6).
+    top_share: n.topSharePercent === null ? null : `${n.topSharePercent}% of all changes`,
   };
 }
 

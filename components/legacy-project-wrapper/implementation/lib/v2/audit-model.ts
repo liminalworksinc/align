@@ -101,8 +101,8 @@ export function fakeModel(): AuditModel {
         purpose: p.context.purpose ?? "An agent whose runs are listed below; its purpose was not stated.",
         why: p.numbers.thin_evidence ? why.slice(0, 1) : why,
         try_this: p.numbers.dominant && top
-          ? { text: `Write a short guide for the ${top} step from your best examples and add it to the agent's instructions.`, exact_text: null, category: top }
-          : { text: "Note which part of the output each change was for over your next runs, then audit again.", exact_text: null, category: null },
+          ? { text: `Write a short guide for the ${top} step from your best examples and add it to the agent's instructions.`, exact_text: null, category: top, addresses: "top_category", finding: null }
+          : { text: "Audit again after your next runs; no single change stands out in these.", exact_text: null, category: null, addresses: "none", finding: null },
         cannot_tell: ["Whether the agent's output was correct; only what you changed was counted."],
         how_you_will_know: "Compare changes per run, now {median_changes}, on your next audit.",
       };

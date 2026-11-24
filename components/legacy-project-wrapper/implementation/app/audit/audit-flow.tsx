@@ -28,7 +28,7 @@ interface Report {
   cannot_tell: string[];
   how_you_will_know: string | null;
   withheld: string | null;
-  numbers: { runs: number; runsUsed: number; totalChanges: number; medianChanges: number; minutesPerUsedRun: number | null; topSharePercent: number | null; thin: boolean; top_category: string | null; top_count: number | null; dominant: boolean };
+  numbers: { runs: number; runsUsed: number; runsUnknown: number; totalChanges: number; medianChanges: number; minutesPerRun: number | null; minutesPerUsedRun: number | null; minutesPerUsedRunMissing: string | null; topSharePercent: number | null; thin: boolean; top_category: string | null; top_count: number | null; dominant: boolean };
   categories: { category: string; count: number; runs: string[] }[];
   table: Row[];
   model: string;
@@ -323,9 +323,11 @@ function ReportView({ report, usingSample, onRestart }: { report: Report; usingS
 
       <dl className="grid grid-cols-2 border-y border-(--line) sm:grid-cols-4">
         {[
-          [`${n.runsUsed} of ${n.runs}`, "runs you used"],
+          n.runsUnknown === n.runs ? ["–", "runs you used (not stated)"] : [`${n.runsUsed} of ${n.runs}`, "runs you used"],
           [String(n.medianChanges), "changes per run, median"],
-          [n.minutesPerUsedRun === null ? "–" : `${n.minutesPerUsedRun} min`, "your time per used run, abandoned runs included (estimate)"],
+          n.minutesPerUsedRun !== null
+            ? [`${n.minutesPerUsedRun} min`, `your time per used run, abandoned runs included (estimate; ${n.minutesPerRun} min per run)`]
+            : [n.minutesPerRun === null ? "–" : `${n.minutesPerRun} min`, `your time per run (estimate)${n.minutesPerUsedRunMissing ? `. Per used run not shown: ${n.minutesPerUsedRunMissing}` : ""}`],
           [n.top_count === null ? "–" : `${n.top_count} of ${n.totalChanges}`, n.top_category ? `changes were to the ${n.top_category}` : "changes"],
         ].map(([v, l], i) => (
           <div key={i} className={`flex min-w-0 flex-col gap-0.5 py-3 pr-3 ${i % 2 ? "pl-3 border-l border-(--line)" : ""} ${i === 2 ? "sm:pl-3 sm:border-l sm:border-(--line)" : ""}`}>

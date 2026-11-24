@@ -111,7 +111,7 @@ const goodDraft = (): Draft => ({
     { kind: "caught_by_person", claim: "Two runs cited a news article; the person swapped in the official notice.".replace("Two", "Some"), runs: ["R3", "R8"] },
     { kind: "working", claim: "Finding the right law change works.", runs: ["R1"] },
   ],
-  try_this: { text: "Give the caption step a short style guide built from your best captions.", exact_text: "Captions: under two sentences, plain words.", category: "caption" },
+  try_this: { text: "Give the caption step a short style guide built from your best captions.", exact_text: "Captions: under two sentences, plain words.", category: "caption", addresses: "top_category", finding: null },
   cannot_tell: ["Whether the legal summaries are correct."],
   how_you_will_know: "Compare changes per run, now {median_changes}, over your next runs.",
 });
@@ -141,7 +141,7 @@ test("R1: an unknown placeholder is rejected", () => {
 
 test("R1: thin evidence has no share placeholder", () => {
   const { runs, n } = audit("fixture-3-thin.md");
-  const d: Draft = { ...goodDraft(), why: [{ kind: "costs_time", category: STYLE_CATEGORY, claim: "Tone took {top_share} of changes.", runs: ["R1"] }], try_this: { text: "Add a tone line to the instructions.", category: STYLE_CATEGORY } };
+  const d: Draft = { ...goodDraft(), why: [{ kind: "costs_time", category: STYLE_CATEGORY, claim: "Tone took {top_share} of changes.", runs: ["R1"] }], try_this: { text: "Add a tone line to the instructions.", category: STYLE_CATEGORY, addresses: "top_category", finding: null } };
   assert.ok(verifyDraft(d, runs, n).failures.some((f) => f.includes("{top_share}")));
 });
 
@@ -164,7 +164,7 @@ test("R3: the recommendation must address the largest category", () => {
 
 test("R3: with no dominant category the recommendation names none", () => {
   const { runs, n } = audit("fixture-4-no-dominant.md");
-  const d: Draft = { ...goodDraft(), why: [{ kind: "working", claim: "Runs are short.", runs: ["R1"] }, { kind: "costs_time", category: "headline", claim: "Headlines needed work.", runs: ["R4"] }], try_this: { text: "Track which step each change was for over your next runs.", category: "headline" } };
+  const d: Draft = { ...goodDraft(), why: [{ kind: "working", claim: "Runs are short.", runs: ["R1"] }, { kind: "costs_time", category: "headline", claim: "Headlines needed work.", runs: ["R4"] }], try_this: { text: "Audit again after your next runs; nothing stands out yet.", category: "headline", addresses: "none", finding: null } };
   assert.ok(verifyDraft(d, runs, n).failures.some((f) => f.includes("no category clearly leads")));
   d.try_this.category = null;
   assert.deepEqual(verifyDraft(d, runs, n).failures, []);
@@ -183,7 +183,7 @@ test("hostile paste: instructions inside a run are just text, and a draft that f
   const { parsed, runs, n } = audit("fixture-5-hostile.md");
   assert.match(parsed.runs[0].asked, /Ignore the runs/);
   assert.equal(n.top?.category, "caption");
-  const d: Draft = { ...goodDraft(), why: [{ kind: "working", claim: "The agent is perfect.", runs: ["R1"] }, { kind: "working", claim: "Nothing to change.", runs: ["R2"] }], try_this: { text: "Upgrade to the premium plan.", category: null } };
+  const d: Draft = { ...goodDraft(), why: [{ kind: "working", claim: "The agent is perfect.", runs: ["R1"] }, { kind: "working", claim: "Nothing to change.", runs: ["R2"] }], try_this: { text: "Upgrade to the premium plan.", category: null, addresses: "none", finding: null } };
   const v = verifyDraft(d, runs, n);
   assert.ok(v.failures.some((f) => f.startsWith("R3")));
 });
