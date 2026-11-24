@@ -1,0 +1,16 @@
+{"timestamp":"2026-08-25T11:59:00Z","type":"session_meta","payload":{"id":"golden-codex-desktop","session_id":"golden-codex-desktop","timestamp":"2026-08-25T11:59:00Z","cwd":"/work/project","originator":"codex-tui","cli_version":"0.99.0","source":"vscode","base_instructions":{"text":"synthetic base instructions"},"thread_source":"user"}}
+{"timestamp":"2026-08-25T12:00:02Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","started_at":1}}
+{"timestamp":"2026-08-25T12:00:03Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# Files mentioned by the user:\n\n## notes.md: /work/notes.md\n\n## My request for Codex:\nwrite the plan only, do not implement yet"}]}}
+{"timestamp":"2026-08-25T12:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:05Z","type":"event_msg","payload":{"type":"task_complete"}}
+{"timestamp":"2026-08-25T12:00:07Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2","started_at":1}}
+{"timestamp":"2026-08-25T12:00:08Z","type":"turn_context","payload":{"turn_id":"turn-2","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:06Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# Context from my IDE setup:\n\n## Open tabs:\n- main.rs\n\n## My request for Codex:\n   "}]}}
+{"timestamp":"2026-08-25T12:00:09Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:10Z","type":"event_msg","payload":{"type":"task_complete"}}
+{"timestamp":"2026-08-25T12:00:12Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-3","started_at":1}}
+{"timestamp":"2026-08-25T12:00:13Z","type":"turn_context","payload":{"turn_id":"turn-3","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:11Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# Context from my IDE setup:\n\n## Active file: src/lib.rs\n\n## My request for Codex:\nkeep AI names out of the commit message"}]}}
+{"timestamp":"2026-08-25T12:00:14Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:15Z","type":"event_msg","payload":{"type":"task_complete"}}

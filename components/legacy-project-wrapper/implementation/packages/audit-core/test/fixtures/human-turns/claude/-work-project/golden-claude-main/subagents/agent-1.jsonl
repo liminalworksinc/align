@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/work/project","sessionId":"golden-claude-main","version":"2.1.0","entrypoint":"cli","type":"user","message":{"role":"user","content":"subagent brief"},"timestamp":"2026-08-25T13:00:01Z","promptId":"p-1"}
+{"parentUuid":null,"isSidechain":false,"userType":"external","sessionId":"golden-claude-main","type":"assistant","timestamp":"2026-08-25T13:00:02Z","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"synthetic answer"}]}}

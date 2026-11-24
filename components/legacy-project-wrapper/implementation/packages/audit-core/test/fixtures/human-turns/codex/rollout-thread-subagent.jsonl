@@ -1,0 +1,6 @@
+{"timestamp":"2026-08-25T11:59:00Z","type":"session_meta","payload":{"id":"golden-codex-thread-subagent","session_id":"golden-codex-thread-subagent","timestamp":"2026-08-25T11:59:00Z","cwd":"/work/project","originator":"codex-tui","cli_version":"0.99.0","source":"vscode","base_instructions":{"text":"synthetic base instructions"},"thread_source":"subagent"}}
+{"timestamp":"2026-08-25T12:00:12Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","started_at":1}}
+{"timestamp":"2026-08-25T12:00:13Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:11Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"synthetic request in a skipped thread"}]}}
+{"timestamp":"2026-08-25T12:00:14Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:15Z","type":"event_msg","payload":{"type":"task_complete"}}
