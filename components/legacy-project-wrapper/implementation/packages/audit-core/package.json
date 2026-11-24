@@ -1,0 +1,13 @@
+{
+  "name": "@liminal/audit-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent audit core: run schema, paste parser, computed numbers, draft verifier and redaction. Pure functions, no network.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=4 test/*.test.ts"
+  }
+}
