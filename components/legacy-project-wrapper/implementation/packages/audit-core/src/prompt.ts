@@ -45,7 +45,8 @@ export const DRAFT_JSON_SCHEMA = {
           claim: { type: "string" },
           runs: { type: "array", items: { type: "string" } },
           category: { type: ["string", "null"] },
-          risk: { type: ["string", "null"], enum: ["external", "internal", null] },
+          // The API refuses an enum on a nullable type list; anyOf is the accepted form.
+          risk: { anyOf: [{ type: "string", enum: ["external", "internal"] }, { type: "null" }] },
         },
       },
     },
