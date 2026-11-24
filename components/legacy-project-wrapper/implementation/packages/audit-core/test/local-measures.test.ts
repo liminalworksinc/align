@@ -39,8 +39,8 @@ test("usage in the window is counted once and priced at list rates", () => {
   const usage = [{ at: min(11), model: "claude-opus-5-5", input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0 }];
   const s = session("s1", "align", [turn(0, "start"), turn(10, "no, wrong file"), turn(15, "ok, next")], [min(0), min(10), min(11), min(15)], usage);
   const m = measure([s]);
-  assert.equal(m.cost.tokens, 1_100_000);
-  assert.equal(m.cost.dollars, 6); // 1M * $4 + 0.1M * $20
+  assert.deepEqual(m.cost.tokens, { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0 });
+  assert.equal(m.cost.newWorkDollarsAtList, 6); // 1M * $4 + 0.1M * $20; cache reads never priced in
 });
 
 test("a rule stated in three or more sessions, with breaks after its first statement", () => {

@@ -63,16 +63,19 @@ const PRICES: Record<string, [number, number, number, number]> = {
   "claude-fable-5-2": [8, 40, 0.2, 10],
   "claude-opus-5": [5, 25, 0.5, 6.25],
 };
-function cost(u: Usage[]): { tokens: number; dollars: number | null; priced: number } {
-  let tokens = 0, dollars = 0, priced = 0;
+/** Tokens split by kind. Dollars only for new work (uncached input plus output) at list prices: cache reads are
+ *  context re-read, not new work, and a subscription user does not pay list prices. Never the headline cost. */
+function cost(u: Usage[]): { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; newWorkDollarsAtList: number | null; priced: number } {
+  const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  let dollars = 0, priced = 0;
   for (const x of u) {
-    tokens += x.input + x.output + x.cacheRead + x.cacheWrite;
+    tokens.input += x.input; tokens.output += x.output; tokens.cacheRead += x.cacheRead; tokens.cacheWrite += x.cacheWrite;
     const p = PRICES[x.model];
     if (!p) continue;
     priced++;
-    dollars += (x.input * p[0] + x.output * p[1] + x.cacheRead * p[2] + x.cacheWrite * p[3]) / 1e6;
+    dollars += (x.input * p[0] + x.output * p[1]) / 1e6;
   }
-  return { tokens, dollars: priced ? Math.round(dollars * 100) / 100 : null, priced };
+  return { tokens, newWorkDollarsAtList: priced ? Math.round(dollars * 100) / 100 : null, priced };
 }
 
 const isoWeek = (t: number) => {
@@ -86,8 +89,9 @@ export interface Measures {
   sessions: number;
   corrections: number;
   byCategory: Record<CorrectionCategory, number>;
-  /** Cost of corrections: active minutes and tokens from each correction to the next non-correction turn. */
-  cost: { minutes: number; tokens: number; dollars: number | null; correctionsCounted: number; usageRecordsPriced: number; note: string };
+  /** Cost of corrections. The headline is active minutes, with the count of corrections it rests on; tokens are split
+   *  by kind; dollars are new work only, at list prices, and never shown as what the rework cost the person. */
+  cost: { minutes: number; correctionsCounted: number; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; newWorkDollarsAtList: number | null; usageRecordsPriced: number; note: string };
   costByCategory: Record<CorrectionCategory, number>;
   /** Rules stated in 3 or more sessions, with corrections on the same rule after its first statement. */
   rules: { rule: CorrectionTheme; label: string; sessions: number; laterBreaks: number; breakSessions: string[] }[];
@@ -159,11 +163,11 @@ export function measure(sessions: Session[]): Measures {
     byCategory,
     cost: {
       minutes: Math.round(minutes),
-      tokens: c.tokens,
-      dollars: c.dollars,
       correctionsCounted: total,
+      tokens: c.tokens,
+      newWorkDollarsAtList: c.newWorkDollarsAtList,
       usageRecordsPriced: c.priced,
-      note: "Estimate: active time from each correction to your next non-correction message, idle gaps over 5 minutes dropped; tokens from the agent's own usage records in those windows, priced at list rates.",
+      note: "Estimate: active time from each correction to your next non-correction message, idle gaps over 5 minutes dropped. Tokens come from the agent's own usage records in those windows; cache reads are context re-read, not new work. Dollars, where shown, are uncached input plus output at list API prices, not what you paid.",
     },
     costByCategory: Object.fromEntries(Object.entries(costByCategory).map(([k, v]) => [k, Math.round(v)])) as Record<CorrectionCategory, number>,
     rules,
