@@ -25,8 +25,22 @@ const isStr = (v: unknown): v is string => typeof v === "string";
 // A caught mistake that acted outside the session. Its risk is "external" whatever the model labels it.
 const EXTERNAL_ACTION = /\b(sen[dt]|sending|email(ed)?|publish(ed)?|post(ed)?|delet(e|ed|ing)|deploy(ed)?|pa(y|id)|merg(e|ed)|push(ed)?|submit(ted)?|charg(e|ed))\b/i;
 
-// A recommendation aimed at the person's own feedback habits rather than the agent (spec §2.6: last resort only).
-const FEEDBACK_COACHING = /\b(when you (correct|give feedback|ask for changes)|your (corrections|feedback)|say what was wrong|label (your|each) (correction|change)|note (which|what) (part|was wrong))\b/i;
+// R7 (founder ruling Nov 24: "yes", recommendations always change the agent, never the person): a recommendation
+// whose subject is the person's own habits. Refused in every case.
+const PERSON_SUBJECT = new RegExp(
+  [
+    String.raw`\bwhen you (correct|give feedback|ask for (changes|a redo)|review|reply)`,
+    String.raw`\byour (corrections|feedback|prompts|requests|replies|review habits)\b`,
+    String.raw`\b(say|tell (it|the agent)|explain)( exactly| clearly| specifically)? what (was|is) wrong\b`,
+    String.raw`\b(the )?(user|person|founder) (should|must|needs to|has to) `,
+    String.raw`\blabel (your|each|every) (correction|change|request)`,
+    String.raw`\bnote (which|what) (part|step|was wrong)`,
+    String.raw`\bbe (more )?(specific|clear|precise|explicit)\b`,
+    String.raw`\bgive (clearer|more specific|better|more detailed) (feedback|instructions|corrections)`,
+    String.raw`\b(write|phrase) (your )?(corrections|feedback|requests) `,
+  ].join("|"),
+  "i",
+);
 
 /** True when `text` carries a number of its own: a digit outside a placeholder or a known run id, or a number word. */
 function carriesNumber(text: string, runIds: Set<string>): boolean {
@@ -130,13 +144,17 @@ export function verifyDraft(draft: Draft, runs: Run[], n: Numbers): Verdict {
     if (t.addresses !== "none") failures.push("R3: nothing leads and nothing was caught, so try_this.addresses must be none");
     if (t.category !== null) failures.push("R3: no category clearly leads, so try_this must not single one out (category null)");
   }
-  // Coaching the person's feedback is the last resort, never while (a) or (b) applies.
-  if (t.addresses !== "none" && FEEDBACK_COACHING.test(t.text)) failures.push("R3: try_this asks the person to change how they give feedback while a change to the agent is available");
+  // R7: the recommendation changes the agent, never the person, in every case.
+  if (t.addresses !== "none" && (PERSON_SUBJECT.test(t.text) || (t.exact_text && PERSON_SUBJECT.test(t.exact_text))))
+    failures.push("R7: try_this asks the person to change how they work or give feedback; it must change the agent's instructions or setup");
+  if (t.addresses === "none" && t.exact_text) failures.push("R7: with no single change standing out, try_this has no exact_text");
 
-  // R4: the first line is an action, not a restatement.
-  const first = draft.try_this.text.trim().split(/(?<=[.!?])\s/)[0] ?? "";
-  const firstWord = (first.match(/[A-Za-z']+/)?.[0] ?? "").toLowerCase();
-  if (!firstWord || NOT_AN_ACTION.has(firstWord)) failures.push("R4: try_this must start with what to do, not a description");
+  // R4: the first line is an action, not a restatement. Not applicable when nothing stands out (no recommendation).
+  if (t.addresses !== "none") {
+    const first = t.text.trim().split(/(?<=[.!?])\s/)[0] ?? "";
+    const firstWord = (first.match(/[A-Za-z']+/)?.[0] ?? "").toLowerCase();
+    if (!firstWord || NOT_AN_ACTION.has(firstWord)) failures.push("R4: try_this must start with what to do, not a description");
+  }
 
   return { ok: failures.length === 0, failures };
 }

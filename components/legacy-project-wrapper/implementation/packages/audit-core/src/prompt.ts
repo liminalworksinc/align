@@ -11,7 +11,7 @@ You receive a JSON object with the agent's runs (already parsed), the numbers co
 
 Write a draft with these parts:
 - purpose: what the agent is for, in two sentences. Use context.purpose when given; otherwise infer it from the runs.
-- try_this: the one change to try first, to the agent or its setup. Start with a verb: say what to do, not what is wrong. Write it so the person can apply it today. When the change is to the agent's instructions, put the exact text to add in exact_text. Set addresses, category and finding as rule 3 says.
+- try_this: the one change to make to the agent: its instructions, its tools, its permissions, or its setup. Never a change to how the person works or gives feedback. Start with a verb: say what to do, not what is wrong. Write it so the person can apply it today. When the change is to the agent's instructions, put the exact text to add in exact_text. Set addresses, category and finding as rule 3 says.
 - why: two or three findings (one is enough when the evidence is thin). kind is costs_time (where the person's time goes), caught_by_person (a mistake the person had to catch) or working (what to keep). Cite the run ids that support each finding. A costs_time finding names its category.
 - cannot_tell: up to four short lines on what these runs cannot show.
 - how_you_will_know: the measure to compare on the next audit. Never promise a result.
@@ -22,8 +22,8 @@ Rules:
 3. Choose what try_this addresses in this order. A mistake the person had to catch outranks repeated rework.
    a. If the runs show a mistake the person had to catch, write it as a caught_by_person finding and set its risk: "external" when the mistake was an action with an effect outside the session (sending, emailing, publishing, posting, deleting, deploying, paying, merging, pushing, submitting), otherwise "internal". Address the riskiest one: external before internal, then the one with the most runs. Recommend a guard, rule or check in the agent that would stop that mistake. Set addresses "caught", category null, finding to that finding's index in why.
    b. Otherwise, when numbers.dominant is true (one category holds at least 40% of all changes): address numbers.top_category. Set addresses "top_category", category to it, finding null, and include a costs_time finding about it.
-   c. Otherwise: say no single change stands out, and suggest how the next audit could find one. Set addresses "none", category null, finding null.
-   Never recommend that the person change how they give feedback unless you are in case c.
+   c. Otherwise: no single change stands out. Set addresses "none", category null, finding null, exact_text null, and text to "No single change stands out." The report then gives no recommendation.
+   The recommendation always changes the agent, never the person. Do not tell the person to label corrections, be more specific, or give clearer feedback, in any case.
 4. No scores, no cost estimates, no speed-up claims, nothing about Liminal or any product.
 5. Plain words. Write the way a careful colleague would.`;
 

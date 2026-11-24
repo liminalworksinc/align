@@ -49,8 +49,10 @@ export async function preview(paste: string): Promise<Preview> {
 }
 
 export interface Report {
-  /** Null when the draft failed verification twice (R6) or the model declined; `withheld` says why. */
+  /** Null when the draft failed verification twice (R6) or the model declined (`withheld` says why), or when no single
+   *  change to the agent stands out (`no_standout`; R7: the report never falls back to coaching the person). */
   try_this: { text: string; exact_text: string | null } | null;
+  no_standout: boolean;
   why: { kind: Draft["why"][number]["kind"]; claim: string; runs: string[] }[];
   purpose: string | null;
   cannot_tell: string[];
@@ -110,7 +112,8 @@ export async function runAudit(payload: unknown, permission: unknown, model: Aud
 
   const { table, categories, top, ...rest } = n;
   return {
-    try_this: draft ? { text: fill(draft.try_this.text, n), exact_text: draft.try_this.exact_text ? fill(draft.try_this.exact_text, n) : null } : null,
+    try_this: draft && draft.try_this.addresses !== "none" ? { text: fill(draft.try_this.text, n), exact_text: draft.try_this.exact_text ? fill(draft.try_this.exact_text, n) : null } : null,
+    no_standout: !!draft && draft.try_this.addresses === "none",
     why: draft ? draft.why.map((w) => ({ kind: w.kind, claim: fill(w.claim, n), runs: w.runs.map((x) => x.toUpperCase()) })) : [],
     purpose: draft ? fill(draft.purpose, n) : null,
     cannot_tell: draft ? draft.cannot_tell.map((c) => fill(c, n)) : [],

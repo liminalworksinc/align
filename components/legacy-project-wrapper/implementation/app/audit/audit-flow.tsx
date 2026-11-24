@@ -23,6 +23,7 @@ interface Preview { runs: Run[]; skipped: string[]; redacted: { email: number; p
 interface Row { id: string; date: string; total: number; byCategory: Record<string, number>; minutes: number | null; used: Run["used"] }
 interface Report {
   try_this: { text: string; exact_text: string | null } | null;
+  no_standout: boolean;
   why: { kind: "costs_time" | "caught_by_person" | "working"; claim: string; runs: string[] }[];
   purpose: string | null;
   cannot_tell: string[];
@@ -281,6 +282,11 @@ function ReportView({ report, usingSample, onRestart }: { report: Report; usingS
           <>
             <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--accent-text)">Try this</p>
             <h1 id="h-report" className="text-balance text-[clamp(24px,4.5vw,34px)] leading-tight font-semibold">{report.try_this.text}</h1>
+          </>
+        ) : report.no_standout ? (
+          <>
+            <h1 id="h-report" className="text-[clamp(22px,4vw,30px)] leading-tight font-semibold">No single change to your agent stands out in these runs.</h1>
+            <p className="max-w-[62ch] text-[15px] text-(--text-2)">Your changes are spread out and nothing you had to catch repeats, so there is no one fix to recommend. The numbers and findings below are complete.</p>
           </>
         ) : (
           <>

@@ -134,6 +134,14 @@ await test("a model that declines gives the numbers and says so", async () => {
   assert.equal(r.table.length, 10);
 });
 
+await test("nothing stands out: the report gives no recommendation and does not coach the person (R7)", async () => {
+  const p = await preview(fixture("fixture-4-no-dominant.md"));
+  const r = await runAudit(p.payload, p.permission, fakeModel());
+  assert.equal(r.try_this, null);
+  assert.equal(r.no_standout, true);
+  assert.equal(r.withheld, null);
+});
+
 await test("nothing is stored: the audit module touches no database or file", async () => {
   const src = readFileSync(new URL("../lib/v2/audit.ts", import.meta.url), "utf8") + readFileSync(new URL("../lib/v2/audit-model.ts", import.meta.url), "utf8");
   assert.doesNotMatch(src, /from "\.\/db"|from "node:fs"|writeFile|console\.(log|info|error)/);

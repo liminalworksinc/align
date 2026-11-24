@@ -71,13 +71,13 @@ test("coaching the person's feedback is refused while a change to the agent is a
     { kind: "working", claim: "Summaries are short.", runs: ["R1"] },
   ];
   const d = base({ text: "Say what was wrong when you correct it, so the next audit can tell.", category: null, addresses: "caught", finding: 0 }, why);
-  assert.ok(verifyDraft(d, runs, n).failures.some((f) => f.includes("how they give feedback")));
+  assert.ok(verifyDraft(d, runs, n).failures.some((f) => f.startsWith("R7")));
 });
 
 test("nothing caught and nothing leads: no single change stands out", () => {
   const { runs, n } = audit("fixture-4-no-dominant.md");
   const why: Draft["why"] = [{ kind: "working", claim: "Runs are short.", runs: ["R1"] }, { kind: "working", claim: "Sources hold up.", runs: ["R2"] }];
-  assert.deepEqual(verifyDraft(base({ text: "Audit again after your next runs; no single change stands out yet.", category: null, addresses: "none", finding: null }, why), runs, n).failures, []);
+  assert.deepEqual(verifyDraft(base({ text: "No single change stands out.", category: null, addresses: "none", finding: null }, why), runs, n).failures, []);
 });
 
 test("minutes per run is always reported; minutes per used run only when every run says whether it was used", () => {
