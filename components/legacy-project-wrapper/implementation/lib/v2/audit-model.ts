@@ -28,8 +28,9 @@ export class AuditModelError extends Error {
 /** Default model: the current Opus. AUDIT_MODEL overrides it (for example to compare Sonnet on the fixtures). */
 const DEFAULT_MODEL = "claude-opus-5-5";
 
-function anthropicModel(apiKey: string, model: string): AuditModel {
-  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 120_000 });
+function anthropicModel(apiKey: string | null, model: string): AuditModel {
+  // apiKey null: local development only, the SDK's own credential chain (an `ant auth login` profile on this machine).
+  const client = apiKey ? new Anthropic({ apiKey, maxRetries: 1, timeout: 120_000 }) : new Anthropic({ maxRetries: 1, timeout: 120_000 });
   return {
     name: model,
     async draft(payload, retry) {
@@ -108,6 +109,8 @@ export function auditModel(): AuditModel | null {
   const which = process.env.AUDIT_MODEL;
   if (which === "fake") return config().hosted ? null : fakeModel();
   const key = process.env.AUDIT_ANTHROPIC_API_KEY;
-  if (!key) return null;
-  return anthropicModel(key, which || DEFAULT_MODEL);
+  if (key) return anthropicModel(key, which || DEFAULT_MODEL);
+  // AUDIT_LOCAL_PROFILE=1: use this machine's Anthropic login (development and the founder's dry run). Never hosted.
+  if (process.env.AUDIT_LOCAL_PROFILE === "1" && !config().hosted) return anthropicModel(null, which || DEFAULT_MODEL);
+  return null;
 }
