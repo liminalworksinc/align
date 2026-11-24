@@ -1,0 +1,116 @@
+{
+  "n": 300,
+  "checks": {
+    "format_ok": {
+      "pass": 300,
+      "n": 300,
+      "rate": 1.0
+    },
+    "correct_action": {
+      "pass": 197,
+      "n": 300,
+      "rate": 0.6567
+    },
+    "correct_plan_version": {
+      "pass": 177,
+      "n": 300,
+      "rate": 0.59
+    },
+    "uses_current_target": {
+      "pass": 7,
+      "n": 210,
+      "rate": 0.0333
+    },
+    "avoids_superseded": {
+      "pass": 196,
+      "n": 201,
+      "rate": 0.9751
+    },
+    "pauses_on_hold": {
+      "pass": 7,
+      "n": 30,
+      "rate": 0.2333
+    },
+    "stops_on_stop": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "continues_after_lift": {
+      "pass": 57,
+      "n": 60,
+      "rate": 0.95
+    },
+    "ignores_unapproved": {
+      "pass": 29,
+      "n": 30,
+      "rate": 0.9667
+    },
+    "overall": {
+      "pass": 9,
+      "n": 300,
+      "rate": 0.03
+    }
+  },
+  "by_event_type": {
+    "chain_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "follow_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "hold": {
+      "pass": 3,
+      "n": 30,
+      "rate": 0.1
+    },
+    "hold_released": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "no_change": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "other_goal_hold": {
+      "pass": 2,
+      "n": 30,
+      "rate": 0.0667
+    },
+    "pending_proposal": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "removed_step": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stop": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "stop_resumed": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    }
+  },
+  "arm": "qwen05b.base_fewshot",
+  "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+  "adapter": null,
+  "context": false,
+  "fewshot": true,
+  "data": "data/episodes_test.jsonl",
+  "decoding": "greedy, max_tokens=80",
+  "seed": 0,
+  "eval_seconds": 363.5
+}
