@@ -18,6 +18,12 @@ export interface Session {
   project: string;
   /** Absolute cwd when the log records one (for the outcomes reader); never sent anywhere. */
   cwd: string | null;
+  /** Absolute folders the agent's own shell commands worked in (`git -C <path>`, `cd <path>`), for the outcomes reader
+   *  when the session itself ran outside a repo. Local only; never sent anywhere. */
+  touched: string[];
+  /** Commit hashes git printed in this session's own tool output (`[branch abc1234] subject`): the session's own
+   *  commits, attributed exactly rather than by time. */
+  ownCommits: string[];
   turns: (HumanTurn & { at: number })[];
   /** Every timestamp in the file, ascending: the activity timeline the cost window is measured on. */
   activity: number[];
@@ -58,7 +64,40 @@ function finish(id: string, tool: Session["tool"], lines: Record<string, unknown
   const cwd = (typeof cwdLine?.cwd === "string" ? cwdLine.cwd : (cwdLine?.payload as Record<string, unknown> | undefined)?.cwd as string | undefined) ?? null;
   // A worktree's folder name says little; name the repo above .claude/worktrees or .worktrees when present.
   const project = cwd ? basename(cwd.replace(/\/\.(?:claude\/)?worktrees\/[^/]+.*$/, "")) : fallbackProject;
-  return { id, tool, project, cwd, turns, activity, usage };
+  return { id, tool, project, cwd, touched: touchedFolders(lines), ownCommits: printedCommits(lines), turns, activity, usage };
+}
+
+/** Commit hashes from `git commit` output in tool results: `[main 9a08f5f] subject` or `[branch (root-commit) 9a08f5f]`. */
+function printedCommits(lines: Record<string, unknown>[]): string[] {
+  const out = new Set<string>();
+  for (const l of lines) {
+    const content = (l.message as Record<string, unknown> | undefined)?.content;
+    if (l.type !== "user" || !Array.isArray(content)) continue;
+    for (const b of content as Record<string, unknown>[]) {
+      if (b?.type !== "tool_result") continue;
+      const parts = Array.isArray(b.content) ? (b.content as Record<string, unknown>[]).map((x) => (typeof x?.text === "string" ? x.text : "")) : [String(b.content ?? "")];
+      for (const text of parts) for (const m of text.matchAll(/^\[[\w./-]+(?: \(root-commit\))? ([0-9a-f]{7,40})\] /gm)) out.add(m[1]);
+    }
+  }
+  return [...out];
+}
+
+/** Absolute folders named by the agent's Bash tool calls: `git -C <path>` and `cd <path>`. */
+function touchedFolders(lines: Record<string, unknown>[]): string[] {
+  const out = new Set<string>();
+  for (const l of lines) {
+    const content = (l.message as Record<string, unknown> | undefined)?.content;
+    if (l.type !== "assistant" || !Array.isArray(content)) continue;
+    for (const b of content as Record<string, unknown>[]) {
+      const cmd = b?.type === "tool_use" && b.name === "Bash" ? (b.input as Record<string, unknown> | undefined)?.command : undefined;
+      if (typeof cmd !== "string") continue;
+      for (const m of cmd.matchAll(/(?:git\s+-C|(?:^|[;&|]\s*)cd)\s+("[^"]+"|'[^']+'|\/[^\s;&|]+)/g)) {
+        const p = m[1].replace(/^["']|["']$/g, "");
+        if (p.startsWith("/")) out.add(p);
+      }
+    }
+  }
+  return [...out];
 }
 
 function readClaude(path: string, projectDir: string, diag: ReadDiagnostics): Session | null {

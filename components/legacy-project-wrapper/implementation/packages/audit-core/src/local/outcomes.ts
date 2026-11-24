@@ -83,6 +83,63 @@ export const FOLLOW_UP_MS = 14 * 86_400_000;
 
 export interface SessionOutcome { outcome: Outcome; repo: string | null; commits: number; note: string }
 
+const RANK: Record<Outcome, number> = { reverted: 4, merged: 3, committed: 2, nothing_landed: 1, unknown: 0 };
+
+/** The outcome from the commits the session itself printed: exact attribution. Each hash is looked up in the
+ *  session's repos (its cwd and the folders its commands touched). Null when none resolves. */
+export function ownCommitsOutcome(ownCommits: string[], folders: string[], start: number, end: number): SessionOutcome | null {
+  if (!ownCommits.length) return null;
+  const roots = new Set<string>();
+  for (const p of folders) { const r = canonicalRepoRoot(p); if (r) roots.add(r); }
+  let best: SessionOutcome | null = null;
+  let found = 0;
+  const repos = new Set<string>();
+  for (const root of roots) {
+    const shas = ownCommits.map((s) => git(root, ["rev-parse", "--verify", "--quiet", `${s}^{commit}`])).filter(Boolean);
+    if (!shas.length) continue;
+    found += shas.length;
+    repos.add(basename(root));
+    const later = commitsBetween(root, start, end + FOLLOW_UP_MS, ["--all"]);
+    const main = commitsBetween(root, start, end + FOLLOW_UP_MS, ["origin/main"]);
+    const subj = (sha: string) => git(root, ["log", "-1", "--pretty=format:%s", sha]);
+    let o: Outcome = "committed";
+    for (const sha of shas) {
+      const s = subj(sha);
+      if (later.some((l) => l.body.includes(`This reverts commit ${sha}`) || l.subject === `Revert "${s}"`)) { o = "reverted"; break; }
+      if (isOnMain(root, sha) || main.some((m) => s.length > 8 && m.subject.startsWith(s))) o = "merged";
+    }
+    if (!best || RANK[o] > RANK[best.outcome]) best = { outcome: o, repo: basename(root), commits: 0, note: "" };
+  }
+  if (!best) return null;
+  return { ...best, commits: found, repo: [...repos].join(", "), note: `From the ${found} commit${found === 1 ? "" : "s"} this session itself made (exact).` };
+}
+
+/** The outcome of a session that may have worked in several repos: the commits it printed itself when any resolve
+ *  (exact); otherwise by time, from its own cwd, else the folders its shell commands touched (an estimate that is
+ *  shared with any other session working in the same repository at the same time). Across repos, a revert anywhere
+ *  wins, then merged, committed, nothing landed. */
+export function sessionOutcomeAcross(cwd: string | null, touched: string[], start: number, end: number, ownCommits: string[] = []): SessionOutcome {
+  const exact = ownCommitsOutcome(ownCommits, [cwd, ...touched].filter((p): p is string => !!p), start, end);
+  if (exact) return exact;
+  const BY_TIME = " Attributed by time: work from any other session in the same repository at the same time counts too.";
+  const own = sessionOutcome(cwd, start, end);
+  if (own.outcome !== "unknown") return own.outcome === "nothing_landed" ? own : { ...own, note: own.note + BY_TIME };
+  const roots = new Map<string, string>();
+  for (const p of touched) { const r = canonicalRepoRoot(p); if (r && !roots.has(r)) roots.set(r, p); }
+  let best: SessionOutcome = own;
+  let commits = 0;
+  const repos: string[] = [];
+  for (const p of roots.values()) {
+    const o = sessionOutcome(p, start, end);
+    if (o.outcome === "unknown") continue;
+    commits += o.commits;
+    if (o.repo) repos.push(o.repo);
+    if (RANK[o.outcome] > RANK[best.outcome]) best = o;
+  }
+  if (best === own) return own;
+  return { ...best, commits, repo: repos.join(", "), note: `${best.note} Read from the repositories its commands worked in (${roots.size}).${best.outcome === "nothing_landed" ? "" : BY_TIME}` };
+}
+
 /** The outcome of one session from its cwd and time span. Commits by anyone in the repo during the session (plus a
  *  short grace) count as its work, so two sessions in one repo at once share commits: an estimate, said so. */
 export function sessionOutcome(cwd: string | null, start: number, end: number): SessionOutcome {

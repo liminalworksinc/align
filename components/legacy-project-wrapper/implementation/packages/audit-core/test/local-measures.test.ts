@@ -11,7 +11,7 @@ import { detectRules, stripPasteBlocks } from "../src/local/rules.ts";
 const T0 = Date.parse("2026-11-20T10:00:00Z");
 const min = (m: number) => T0 + m * 60_000;
 const turn = (m: number, text: string, long = false) => ({ text, detectText: text, ts: new Date(min(m)).toISOString(), long, at: min(m) });
-const session = (id: string, project: string, turns: Session["turns"], activity: number[] = turns.map((t) => t.at), usage: Session["usage"] = []): Session => ({ id, tool: "claude", project, cwd: null, turns, activity, usage });
+const session = (id: string, project: string, turns: Session["turns"], activity: number[] = turns.map((t) => t.at), usage: Session["usage"] = []): Session => ({ id, tool: "claude", project, cwd: null, touched: [], ownCommits: [], turns, activity, usage });
 
 test("active minutes drop idle gaps over five minutes", () => {
   assert.equal(activeMinutes([min(1), min(3), min(20), min(22)], min(0), min(23)), 6); // 1 + 2, the 17 dropped, 2 + 1
