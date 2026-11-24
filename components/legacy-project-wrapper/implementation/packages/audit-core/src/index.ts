@@ -5,3 +5,5 @@ export * from "./parse.ts";
 export * from "./numbers.ts";
 export * from "./verify.ts";
 export * from "./redact.ts";
+export * from "./prompt.ts";
+export * from "./consent.ts";
