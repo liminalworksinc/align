@@ -12,6 +12,8 @@ import { config } from "../config";
 export interface AuditModel {
   /** Which model drafted, for the report's footer. */
   readonly name: string;
+  /** Tokens used by this instance's calls so far (for measuring cost per audit). Absent on fakes. */
+  readonly usage?: { input: number; output: number };
   /** One drafting call. `retry` carries the previous draft and the checks it failed. Returns the parsed JSON reply,
    *  still untrusted: the caller shape-checks and verifies it. */
   draft(payload: string, retry?: { previous: string; note: string }): Promise<unknown>;
@@ -31,8 +33,10 @@ const DEFAULT_MODEL = "claude-opus-5-5";
 function anthropicModel(apiKey: string | null, model: string): AuditModel {
   // apiKey null: local development only, the SDK's own credential chain (an `ant auth login` profile on this machine).
   const client = apiKey ? new Anthropic({ apiKey, maxRetries: 1, timeout: 120_000 }) : new Anthropic({ maxRetries: 1, timeout: 120_000 });
+  const usage = { input: 0, output: 0 };
   return {
     name: model,
+    usage,
     async draft(payload, retry) {
       const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: payload }];
       if (retry) messages.push({ role: "assistant", content: retry.previous }, { role: "user", content: retry.note });
@@ -56,6 +60,8 @@ function anthropicModel(apiKey: string | null, model: string): AuditModel {
         const status = e instanceof Anthropic.APIError ? e.status : undefined;
         throw new AuditModelError("unavailable", `The model could not be reached${status ? ` (${status})` : ""}`);
       }
+      usage.input += res.usage.input_tokens + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
+      usage.output += res.usage.output_tokens;
       if (res.stop_reason === "refusal") throw new AuditModelError("refused", "The model declined to write this audit");
       if (res.stop_reason === "max_tokens") throw new AuditModelError("incomplete", "The model's draft was cut off");
       const text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");

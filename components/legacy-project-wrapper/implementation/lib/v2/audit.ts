@@ -60,6 +60,8 @@ export interface Report {
   categories: { category: string; count: number; runs: string[] }[];
   table: Numbers["table"];
   model: string;
+  /** Tokens this audit used across its model calls (null for fakes). Counts only; no text. */
+  tokens: { input: number; output: number } | null;
 }
 
 const REASONS: Record<string, string> = {
@@ -118,5 +120,6 @@ export async function runAudit(payload: unknown, permission: unknown, model: Aud
     categories,
     table,
     model: model.name,
+    tokens: model.usage ? { ...model.usage } : null,
   };
 }
