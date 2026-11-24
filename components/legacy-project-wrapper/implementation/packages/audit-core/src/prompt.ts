@@ -19,9 +19,9 @@ Write a draft with these parts:
 Rules:
 1. Never write a number. Not digits, not number words, not "most of". Where a count belongs, write a placeholder from "placeholders", for example "{top_count} of {total_changes} changes". Run ids such as R4 are allowed.
 2. Cite only run ids that appear in "runs", and only runs that support the claim.
-3. Choose what try_this addresses in this order:
-   a. When numbers.dominant is true (one category holds at least 40% of all changes): address numbers.top_category. Set addresses "top_category", category to it, finding null, and include a costs_time finding about it.
-   b. Otherwise, if the runs show a mistake the person had to catch (a caught_by_person finding), address the caught_by_person finding with the most runs: a guard, rule or check in the agent that would stop that mistake. Set addresses "caught", category null, finding to that finding's index in why. An error a person had to catch outranks diffuse rework.
+3. Choose what try_this addresses in this order. A mistake the person had to catch outranks repeated rework.
+   a. If the runs show a mistake the person had to catch, write it as a caught_by_person finding and set its risk: "external" when the mistake was an action with an effect outside the session (sending, emailing, publishing, posting, deleting, deploying, paying, merging, pushing, submitting), otherwise "internal". Address the riskiest one: external before internal, then the one with the most runs. Recommend a guard, rule or check in the agent that would stop that mistake. Set addresses "caught", category null, finding to that finding's index in why.
+   b. Otherwise, when numbers.dominant is true (one category holds at least 40% of all changes): address numbers.top_category. Set addresses "top_category", category to it, finding null, and include a costs_time finding about it.
    c. Otherwise: say no single change stands out, and suggest how the next audit could find one. Set addresses "none", category null, finding null.
    Never recommend that the person change how they give feedback unless you are in case c.
 4. No scores, no cost estimates, no speed-up claims, nothing about Liminal or any product.
@@ -39,12 +39,13 @@ export const DRAFT_JSON_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["kind", "claim", "runs", "category"],
+        required: ["kind", "claim", "runs", "category", "risk"],
         properties: {
           kind: { type: "string", enum: ["costs_time", "caught_by_person", "working"] },
           claim: { type: "string" },
           runs: { type: "array", items: { type: "string" } },
           category: { type: ["string", "null"] },
+          risk: { type: ["string", "null"], enum: ["external", "internal", null] },
         },
       },
     },

@@ -22,6 +22,9 @@ const NOT_AN_ACTION = new Set([
 
 const isStr = (v: unknown): v is string => typeof v === "string";
 
+// A caught mistake that acted outside the session. Its risk is "external" whatever the model labels it.
+const EXTERNAL_ACTION = /\b(sen[dt]|sending|email(ed)?|publish(ed)?|post(ed)?|delet(e|ed|ing)|deploy(ed)?|pa(y|id)|merg(e|ed)|push(ed)?|submit(ted)?|charg(e|ed))\b/i;
+
 // A recommendation aimed at the person's own feedback habits rather than the agent (spec §2.6: last resort only).
 const FEEDBACK_COACHING = /\b(when you (correct|give feedback|ask for changes)|your (corrections|feedback)|say what was wrong|label (your|each) (correction|change)|note (which|what) (part|was wrong))\b/i;
 
@@ -47,6 +50,7 @@ export function shapeFailures(d: unknown): string[] {
     if (!isStr(y.claim)) f.push(`why[${i}].claim must be a string`);
     if (!Array.isArray(y.runs) || !(y.runs as unknown[]).every(isStr)) f.push(`why[${i}].runs must be a list of run ids`);
     if (y.category !== undefined && y.category !== null && !isStr(y.category)) f.push(`why[${i}].category must be a string or null`);
+    if (y.risk !== undefined && y.risk !== null && y.risk !== "external" && y.risk !== "internal") f.push(`why[${i}].risk must be external, internal or null`);
   });
   const t = x.try_this as Record<string, unknown> | undefined;
   if (!t || typeof t !== "object" || !isStr(t.text)) f.push("try_this.text must be a string");
@@ -101,21 +105,27 @@ export function verifyDraft(draft: Draft, runs: Run[], n: Numbers): Verdict {
     }
   });
 
-  // R3 (spec §2.6, proposed Nov 24, pending founder confirmation), in order:
-  // (a) a category holding at least 40% of changes; (b) otherwise the caught_by_person finding with the most runs,
-  // since an error a person had to catch outranks diffuse rework; (c) otherwise no single change stands out.
+  // R3, founder ruling Nov 24 ("caught mistakes first", ranked by how risky they are), in order:
+  // (1) a caught_by_person finding: the most risky first (an action with an effect outside the session), then the one
+  // with the most runs; (2) otherwise a category holding at least 40% of changes; (3) otherwise nothing stands out.
   const t = draft.try_this;
+  draft.why.forEach((w, i) => {
+    if (w.kind !== "caught_by_person") return;
+    if (w.risk !== "external" && w.risk !== "internal") failures.push(`R3: why[${i}] is caught_by_person and must set risk to external or internal`);
+    else if (w.risk === "internal" && EXTERNAL_ACTION.test(w.claim)) failures.push(`R3: why[${i}] describes an action outside the session, so its risk is external`);
+  });
   const caught = draft.why.map((w, i) => ({ w, i })).filter(({ w }) => w.kind === "caught_by_person");
-  const mostRuns = Math.max(0, ...caught.map(({ w }) => w.runs.length));
-  if (n.dominant && n.top) {
+  const rank = (w: Finding) => (w.risk === "external" ? 1_000 : 0) + w.runs.length;
+  const best = Math.max(0, ...caught.map(({ w }) => rank(w)));
+  if (caught.length) {
+    if (t.addresses !== "caught") failures.push("R3: a mistake the person had to catch comes first, so try_this must address it (addresses caught)");
+    else if (t.finding === null || draft.why[t.finding]?.kind !== "caught_by_person" || rank(draft.why[t.finding]) !== best)
+      failures.push("R3: try_this.finding must point to the riskiest caught_by_person finding (an action outside the session first), then the one with the most runs");
+    if (t.category !== null) failures.push("R3: try_this.category must be null when it addresses a caught finding");
+  } else if (n.dominant && n.top) {
     if (t.addresses !== "top_category") failures.push(`R3: ${n.top.category} holds at least 40% of changes, so try_this must address it (addresses top_category)`);
     if (t.category !== n.top.category) failures.push(`R3: try_this must address ${n.top.category}, the largest category`);
     if (!draft.why.some((w) => w.kind === "costs_time" && w.category === n.top!.category)) failures.push(`R3: no costs_time finding for ${n.top.category}`);
-  } else if (caught.length) {
-    if (t.addresses !== "caught") failures.push("R3: no category holds 40% of changes, so try_this must address the caught_by_person finding with the most runs (addresses caught)");
-    else if (t.finding === null || draft.why[t.finding]?.kind !== "caught_by_person" || draft.why[t.finding].runs.length !== mostRuns)
-      failures.push("R3: try_this.finding must point to the caught_by_person finding with the most runs");
-    if (t.category !== null) failures.push("R3: try_this.category must be null when it addresses a caught finding");
   } else {
     if (t.addresses !== "none") failures.push("R3: nothing leads and nothing was caught, so try_this.addresses must be none");
     if (t.category !== null) failures.push("R3: no category clearly leads, so try_this must not single one out (category null)");

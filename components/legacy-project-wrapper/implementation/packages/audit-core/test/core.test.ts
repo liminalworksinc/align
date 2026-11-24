@@ -108,8 +108,8 @@ const goodDraft = (): Draft => ({
   purpose: "Turns each week's state law changes into a post and captions a small-business owner can act on.",
   why: [
     { kind: "costs_time", category: "caption", claim: "{top_count} of {total_changes} changes were to the caption, in {top_runs} of {runs} runs.", runs: ["R4", "R7"] },
-    { kind: "caught_by_person", claim: "Two runs cited a news article; the person swapped in the official notice.".replace("Two", "Some"), runs: ["R3", "R8"] },
     { kind: "working", claim: "Finding the right law change works.", runs: ["R1"] },
+    { kind: "working", claim: "The weekly structure holds.", runs: ["R2"] },
   ],
   try_this: { text: "Give the caption step a short style guide built from your best captions.", exact_text: "Captions: under two sentences, plain words.", category: "caption", addresses: "top_category", finding: null },
   cannot_tell: ["Whether the legal summaries are correct."],

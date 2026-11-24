@@ -42,15 +42,18 @@ export interface Finding {
   claim: string;
   runs: string[];
   category?: string | null;
+  /** caught_by_person only: "external" when the mistake was an action with an effect outside the session (send,
+   *  publish, delete, deploy, pay, merge); otherwise "internal". */
+  risk?: "external" | "internal" | null;
 }
 
 /** The model's draft (spec §3.1 step 4). Prose only: every number is filled in by code from placeholders (R1). */
 export interface Draft {
   purpose: string;
   why: Finding[];
-  /** What the recommendation addresses (spec §2.6 R3, proposed Nov 24, pending founder confirmation):
-   *  "top_category" when one category holds at least 40% of changes; otherwise "caught", the caught_by_person finding
-   *  (index in `why`) with the most runs; otherwise "none". */
+  /** What the recommendation addresses (founder ruling Nov 24: "caught mistakes first", ranked by risk):
+   *  "caught", the caught_by_person finding (index in `why`) with the highest risk, then the most runs; otherwise
+   *  "top_category" when one category holds at least 40% of changes; otherwise "none". */
   try_this: { text: string; exact_text?: string | null; category: string | null; addresses: "top_category" | "caught" | "none"; finding: number | null };
   cannot_tell: string[];
   how_you_will_know: string;
