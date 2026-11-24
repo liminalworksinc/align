@@ -9,8 +9,9 @@ import { config as alignConfig, hostAllowed, hostName, LOOPBACK, startupProblems
 // HOSTED=1: the ALIGN_HOSTS allowlist replaces loopback; then HTTPS is required (X-Forwarded-Proto from Fly's proxy is
 // trusted only in this mode) and the request must come through that proxy (Fly-Client-IP). Only the allowlisted paths
 // below are served: everything else is 404, so a route added later is closed when hosted until it is listed here.
-// The two public trust pages, /privacy and /trust, are exact paths: nothing under them is served.
-const HOSTED_ROUTES = /^\/(?:app|api\/v2|api\/mcp|oauth|\.well-known|api\/oauth)(?:\/|$)|^\/(?:privacy|trust)$/;
+// The public trust pages, /privacy and /trust, and the agent audit page, /audit (release A, open to anyone with the
+// link: founder ruling 2026-11-24), are exact paths: nothing under them is served. The audit's API is under /api/v2.
+const HOSTED_ROUTES = /^\/(?:app|api\/v2|api\/mcp|oauth|\.well-known|api\/oauth)(?:\/|$)|^\/(?:privacy|trust|audit)$/;
 
 /** /app on the loopback name and port the browser used (Next may normalize nextUrl's host), so its cookies still apply. */
 function toApp(request: NextRequest): URL {
