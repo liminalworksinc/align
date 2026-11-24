@@ -14,7 +14,8 @@ const STOP = new Set(["the", "a", "an", "to", "of", "and", "or", "in", "on", "fo
 // Negation is part of a rule's meaning: "send" and "don't send" are opposite rules.
 const NEG = /\b(?:don'?t|dont|do not|never|no|not|stop|avoid|without)\b/i;
 
-const stem = (w: string) => w.replace(/(?:ing|ed|es|s)$/, "") || w;
+// Crude but consistent: "quote", "quoted", "quotes" and "quoting" all reduce to "quot".
+const stem = (w: string) => (w.length > 4 ? w.replace(/(?:ing|ed|es|s)$/, "").replace(/e$/, "") : w) || w;
 
 /** The content tokens of a directive sentence, with a NOT marker when it is a prohibition. */
 export function ruleTokens(sentence: string): Set<string> {
@@ -29,6 +30,16 @@ const jaccard = (a: Set<string>, b: Set<string>) => {
   for (const x of a) if (b.has(x)) inter++;
   return inter / (a.size + b.size - inter || 1);
 };
+
+/** Overlap of the smaller set: a correction ("nope, you quoted a refund amount again") carries extra words that dilute
+ *  Jaccard, but still contains the rule's core. Used for breaks only, not for grouping statements. */
+const containment = (a: Set<string>, b: Set<string>) => {
+  let inter = 0;
+  const core = [...a].filter((x) => x !== "NOT");
+  for (const x of core) if (b.has(x)) inter++;
+  return inter / Math.max(1, Math.min(core.length, [...b].filter((x) => x !== "NOT").length));
+};
+export const BREAK_OVERLAP = 0.6;
 
 const SENTENCES = (t: string) => t.split(/(?<=[.!?])\s+|\n+|;\s+/).map((s) => s.replace(/^[-*•\d.)\s]+/, "").trim()).filter(Boolean);
 
@@ -113,7 +124,7 @@ export function discoverRules(sessions: Session[], isCorrection: (sessionId: str
       for (const g of groups) {
         const touches = g.family
           ? FAMILIES.find((f) => f.label === g.family)!.breakRe.test(text)
-          : sentenceTokens.some((tk) => jaccard(tk, g.tokens) >= SIMILAR);
+          : sentenceTokens.some((tk) => containment(g.tokens, tk) >= BREAK_OVERLAP);
         if (touches) hits.push({ group: g, session: s.id, at: t.at, correction: true });
       }
     });
