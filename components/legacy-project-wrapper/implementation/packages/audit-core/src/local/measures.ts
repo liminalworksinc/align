@@ -2,6 +2,7 @@
 // the rework lives. Pure over sessions from read.ts. Every number is an estimate and carries the count it rests on.
 // Local only: not exported from src/index.ts.
 
+import type { Outcome } from "./outcomes.ts";
 import type { Session, Usage } from "./read.ts";
 import { DIRECTIVE, RULE_LABELS, detectRules, stripPasteBlocks, type CorrectionTheme } from "./rules.ts";
 
@@ -97,12 +98,18 @@ export interface Measures {
   rules: { rule: CorrectionTheme; label: string; sessions: number; laterBreaks: number; breakSessions: string[] }[];
   byProject: { project: string; sessions: number; corrections: number; perSession: number }[];
   byWeek: { week: string; sessions: number; corrections: number; perSession: number }[];
+  /** Outcome per session (outcomes.ts), when supplied: counts, and corrections per session for each outcome. */
+  outcomes: { outcome: Outcome; sessions: number; corrections: number; perSession: number }[] | null;
 }
+
+/** Outcomes are read from git by the caller (outcomes.ts) and passed in, so measure() stays pure. */
+export type OutcomeOf = (s: Session) => Outcome;
 
 const zero = (): Record<CorrectionCategory, number> => ({ style: 0, facts: 0, redo: 0, scope: 0, other: 0 });
 const r1 = (x: number) => Math.round(x * 10) / 10;
 
-export function measure(sessions: Session[]): Measures {
+export function measure(sessions: Session[], outcomeOf?: OutcomeOf): Measures {
+  const byOutcome = new Map<Outcome, { sessions: number; corrections: number }>();
   const byCategory = zero(), costByCategory = zero();
   let total = 0, minutes = 0;
   const usageInWindows: Usage[] = [];
@@ -129,6 +136,12 @@ export function measure(sessions: Session[]): Measures {
 
     const cs = corrections(s);
     const isCorr = new Set(cs.map((c) => c.index));
+    if (outcomeOf) {
+      const o = outcomeOf(s);
+      const e = byOutcome.get(o) ?? { sessions: 0, corrections: 0 };
+      e.sessions++; e.corrections += cs.length;
+      byOutcome.set(o, e);
+    }
     for (const c of cs) {
       total++; byCategory[c.category]++; p.corrections++;
       const wk = week.get(isoWeek(c.at)) ?? { sessions: new Set(), corrections: 0 };
@@ -173,5 +186,6 @@ export function measure(sessions: Session[]): Measures {
     rules,
     byProject: [...proj].map(([project, v]) => ({ project, ...v, perSession: r1(v.corrections / v.sessions) })).sort((a, b) => b.corrections - a.corrections),
     byWeek: [...week].map(([wk, v]) => ({ week: wk, sessions: v.sessions.size, corrections: v.corrections, perSession: r1(v.corrections / Math.max(1, v.sessions.size)) })).sort((a, b) => a.week.localeCompare(b.week)),
+    outcomes: outcomeOf ? [...byOutcome].map(([outcome, v]) => ({ outcome, ...v, perSession: r1(v.corrections / v.sessions) })).sort((a, b) => b.sessions - a.sessions) : null,
   };
 }

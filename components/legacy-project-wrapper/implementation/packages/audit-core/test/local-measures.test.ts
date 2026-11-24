@@ -80,6 +80,20 @@ test("where the rework lives, by project and by week", () => {
   assert.deepEqual(m.byWeek.map((w) => [w.week, w.corrections]), [["2026-11-16", 3]]);
 });
 
+test("outcomes roll up per session when an outcome reader is supplied", () => {
+  const sessions = [
+    session("a", "align", [turn(0, "go"), turn(1, "no, wrong one")]),
+    session("b", "align", [turn(0, "go"), turn(1, "ok")]),
+    session("c", "liminal", [turn(0, "go"), turn(1, "fix it again"), turn(2, "no, redo")]),
+  ];
+  const m = measure(sessions, (s) => (s.id === "c" ? "unknown" : "merged"));
+  assert.deepEqual(m.outcomes, [
+    { outcome: "merged", sessions: 2, corrections: 1, perSession: 0.5 },
+    { outcome: "unknown", sessions: 1, corrections: 2, perSession: 2 },
+  ]);
+  assert.equal(measure(sessions).outcomes, null);
+});
+
 test("the reader keeps human turns, skips subagent logs and SDK runs, and measures only the window", () => {
   const home = mkdtempSync(join(tmpdir(), "audit-home-"));
   try {
