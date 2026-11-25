@@ -15,7 +15,7 @@ import { enqueue } from "../src/share.ts";
 import { localId } from "../src/shared/layout.ts";
 import { ingestSpool, syncOnce } from "../src/sync.ts";
 import { FakeServer } from "./fake-server.ts";
-import { CLI, claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, usage, writeLines } from "./helpers.ts";
+import { CLI, claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runCliAsPerson, runHook, usage, writeLines } from "./helpers.ts";
 
 const PROMPT = "CANARY-FIRST-PROMPT";
 const REPLY = "CANARY-PRIVATE-REPLY";
@@ -71,9 +71,10 @@ async function setup(t: TestContext) {
   const env = makeEnv({ ALIGN_SERVER: fake.url, ALIGN_DEVICE_POLL_SCALE_MS: "10", ALIGN_DECISION_WORKSPACE_KEY: KEY });
   t.after(() => fake.stop());
   t.after(() => env.cleanup());
+  // Consent choices are a person's (spec #117), so data-sharing commands run at a terminal with no agent markers.
   const cli = async (...args: string[]) => {
-    const r = await runCli(env, args);
-    assert.equal(r.code, 0, r.stderr);
+    const r = args[0] === "data-sharing" ? await runCliAsPerson(env, args) : await runCli(env, args);
+    assert.equal(r.code, 0, r.stderr || r.stdout);
     return r.stdout;
   };
   await cli("login");

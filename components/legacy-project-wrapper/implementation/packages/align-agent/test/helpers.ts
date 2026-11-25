@@ -77,6 +77,29 @@ export function runCli(t: TestEnv, args: string[], extraEnv: NodeJS.ProcessEnv =
   });
 }
 
+/** The agent markers `agentMayRead` checks (src/hooks/siblings.ts). A person's shell has none of them. */
+const AGENT_MARKERS = ["CLAUDECODE", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CODEX_THREAD_ID"];
+
+/** Run the CLI as a person at a terminal: under a real pseudo-terminal (`script`) with no agent markers, the only way to
+ *  pass the person checks on turning a consent on (spec #117). There is deliberately no environment switch for this:
+ *  one would let an agent pass too. The terminal merges stderr into stdout, so both are in `stdout`. */
+export function runCliAsPerson(t: TestEnv, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const env: NodeJS.ProcessEnv = { ...t.env, ...extraEnv };
+  for (const k of AGENT_MARKERS) delete env[k];
+  const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+  const command = [process.execPath, CLI, ...args];
+  const [file, scriptArgs] = process.platform === "darwin"
+    ? ["script", ["-q", "/dev/null", ...command]]
+    : ["script", ["-qec", command.map(quote).join(" "), "/dev/null"]];
+  return new Promise((resolve) => {
+    const p = spawn(file, scriptArgs, { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    p.stdout.on("data", (d) => (stdout += d));
+    p.stderr.on("data", (d) => (stdout += d));
+    p.on("close", (code) => resolve({ stdout: stdout.replace(/^\^D\x08\x08/, "").replaceAll("\r\n", "\n"), stderr: "", code }));
+  });
+}
+
 /** What an edit tool does once its PreToolUse hook let it run: write the file (now, or at `at`). Align reports an edit
  *  only if its file changed after the hook recorded it (C3-9). */
 export function touch(file: string, at?: Date): void {

@@ -80,6 +80,19 @@ const err = (s: string): void => {
 };
 class UsageError extends Error {}
 
+/** Whether a person, not an agent, is at the keyboard: both ends are a terminal and no agent shell is detected. */
+function personPresent(): boolean {
+  return !agentMayRead(!!process.stdout.isTTY && !!process.stdin.isTTY);
+}
+
+/** Turning a consent on needs a person (spec #117, "A person turns consent on"). An agent's request is refused before
+ *  any state changes or request is made. Turning something off is always allowed. */
+function needPerson(what: string): void {
+  if (!personPresent()) {
+    throw new UsageError(`${what} can only be turned on by a person. Run this command yourself in a terminal; an agent can't turn it on.`);
+  }
+}
+
 const HELP = `align ${VERSION}: Align local agent
 
   align login [--server <url> | --dev] [--name <device name>]
@@ -1314,6 +1327,7 @@ async function cmdDataSharing(ctx: Ctx, args: string[]) {
     const session = resolveSession(ctx, ref);
     if (!choice) return out(`Work signals ${signalsAllowed(ctx, session.local_id) ? "on" : "off"} for this session on this machine.`);
     if (choice === "on" || choice === "off") {
+      if (choice === "on") needPerson("Work signals");
       kvSet(ctx.db, `signals:${session.local_id}`, choice === "on" ? "1" : "0");
       const share = getShare(ctx, session.local_id);
       if (choice === "off" && share && share.state !== "error") {
@@ -1324,11 +1338,13 @@ async function cmdDataSharing(ctx: Ctx, args: string[]) {
     }
   }
   if (option === "results" && (ref === "on" || ref === "off") && !choice) {
+    if (ref === "on") needPerson("Derived results");
     const status = await setResultsEnabled(ctx, ref === "on");
     if (status === "unavailable") return out("Hosted Align cannot receive derived findings. They stay on this machine.");
     return out(`Derived results ${ref} on this machine.${status === "pending" ? " The server has not acknowledged the choice. The next sync retries." : ""}`);
   }
   if (option === "session-question" && (ref === "on" || ref === "off") && !choice) {
+    if (ref === "on") needPerson("Session questions");
     await setGoalSuggestionConsent(ctx, "session", undefined, ref === "on");
     return out(ref === "on"
       ? "Session questions on for this machine where the workspace allows them. The current integrations skip forks because they cannot keep the original provider and account for the fork."
@@ -1342,6 +1358,7 @@ async function cmdDataSharing(ctx: Ctx, args: string[]) {
       await setGoalSuggestionConsent(ctx, "provider", ws.id, false);
       return out(`Decision model suggestions off for ${ws.name} on this machine.`);
     }
+    needPerson("Decision model suggestions");
 
     await needLogin(ctx);
     const unbind = bindDevice(ctx);
@@ -1372,15 +1389,19 @@ async function cmdDataSharing(ctx: Ctx, args: string[]) {
       out(`Decision recipient ${terminalText(endpoint)} for ${terminalText(ws.name)}.`);
       out("After sync, this endpoint receives the last assistant reply (up to 2,000 UTF-8 bytes), the wording and types of up to ten limits, and fixed questions. The reply may mention private details. The request includes a key for this endpoint.");
       out("It sends no separate prompt, earlier reply, tool call or result, workspace or session identifier, or feedback. A workspace owner can block these requests.");
+      // The code is shown only to a person at a terminal, never to output an agent may read (spec #117).
+      if (!personPresent()) return out(`To allow this on this machine, run align data-sharing model preview --workspace ${ws.id} yourself in a terminal for the code. To stop it, run align data-sharing model off --workspace ${ws.id}.`);
       return out(`To allow this on this machine, run align data-sharing model on ${code} --workspace ${ws.id}. To stop it, run align data-sharing model off --workspace ${ws.id}.`);
     }
     if ((ref === "off" && !choice) || (ref === "on" && choice)) {
       if (!ws) throw new UsageError("Choose a workspace with --workspace <name>.");
+      if (ref === "on") needPerson("Model limit checks");
       await setModelChecks(ctx, ws.id, choice);
       return out(`Model limit checks ${ref} on this machine for ${ws.name}.`);
     }
   }
   if (option === "excerpts" && (ref === "on" || ref === "off") && !choice) {
+    if (ref === "on") needPerson("Excerpt sharing");
     const saved = await setExcerptSharing(ctx, ref === "on");
     return out(`Excerpt sharing ${ref} on this machine.${saved ? "" : " Sign in and repeat this command to also turn it off at Align."}`);
   }
@@ -1473,6 +1494,7 @@ async function cmdExcerpt(ctx: Ctx, args: string[]) {
   } });
   const { turn, file, reader, purpose, hours, confirm } = values;
   if (!turn || !file || !reader || !purpose || !hours || (action === "share" ? !confirm : !!confirm)) throw new UsageError(help);
+  if (action === "share") needPerson("Sharing an excerpt");
   const result = await prepareExcerpt(ctx, session.local_id, { turn, file, purpose, readerIds: reader, hours: Number(hours) }, confirm);
   const page = `${result.server.replace(/\/$/, "")}/app/w/${encodeURIComponent(result.ws)}/sessions/excerpts`;
   if ("id" in result) return out(`Excerpt shared through ${result.expiresAt}. To revoke it, open ${page}`);
@@ -1481,6 +1503,8 @@ async function cmdExcerpt(ctx: Ctx, args: string[]) {
   out(`Purpose ${terminalText(result.purpose)}`);
   out(`Expires ${result.hours} hour(s) after Align accepts it.`);
   out(`Exact excerpt (escaped) ${terminalText(result.text)}`);
+  // The confirmation code is shown only to a person at a terminal, never to output an agent may read (spec #117).
+  if (!personPresent()) return out("To share this text, run this preview yourself in a terminal for the confirmation code.");
   out(`To share this text, repeat the command with share instead of preview and add --confirm ${result.code}.`);
 }
 

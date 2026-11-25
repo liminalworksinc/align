@@ -25,7 +25,7 @@ import { readJson } from "../src/shared/fsx.ts";
 import type { AsksFile, HotState } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
 import { pathHash, record, repoIdentity } from "../src/hooks/siblings.ts";
-import { appendLines, claudeAssistant, claudeUser, ctxFor, makeEnv, rows, runCli, runHook, touch, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
+import { appendLines, claudeAssistant, claudeUser, ctxFor, makeEnv, rows, runCli, runCliAsPerson, runHook, touch, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -717,7 +717,7 @@ test("the analysis worker sends nothing by default and sends only the allowed fi
   await syncOnce(ctx, { tailBudgetMs: 200 });
   assert.equal(fake.log.slice(mark).some((row) => /analysis|data-sharing|work-signals/.test(row.path)), false);
   assert.equal(inspectLocal().turns[0].findings.length, 1);
-  assert.match((await runCli(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
+  assert.match((await runCliAsPerson(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
   let separateLease = false;
   let malformed = false;
   fake.beforeRequest = (method, url) => {
@@ -743,10 +743,10 @@ test("the analysis worker sends nothing by default and sends only the allowed fi
   await syncOnce(ctx, { tailBudgetMs: 200 });
   assert.ok(fake.log.slice(sinceHosted).some((row) => row.method === "GET" && row.path.endsWith("/analysis")));
   assert.ok(fake.log.slice(sinceHosted).every((row) => row.method !== "POST" || !row.path.endsWith("/analysis")));
-  const hostedChoice = await runCli(t, ["data-sharing", "results", "on"]);
+  const hostedChoice = await runCliAsPerson(t, ["data-sharing", "results", "on"]);
   assert.match(hostedChoice.stdout, /Hosted Align cannot receive derived findings/);
   fake.findingsAvailable = true;
-  assert.match((await runCli(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
+  assert.match((await runCliAsPerson(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
   fake.findingsBlocked = true;
   complete("blocked");
   await syncOnce(ctx, { tailBudgetMs: 200 });
@@ -901,9 +901,10 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
   const hidden = "Before\u200bAfter";
   const spelled = "Before\\u200bAfter";
   const reply = `I'll remove the old entries. ${tags[2]} ${tags[5]} ${hidden} ${spelled}`;
+  // This test turns consents on, previews and shares excerpts, so its commands run as a person at a terminal (spec #117).
   const cli = async (args: string[], configuration = env) => {
-    const result = await runCli(t, args, configuration);
-    assert.equal(result.code, 0, result.stderr);
+    const result = await runCliAsPerson(t, args, configuration);
+    assert.equal(result.code, 0, result.stdout);
     return result.stdout;
   };
   const prompt = (root: string, text: string) => runHook(t, "claude", "UserPromptSubmit",
@@ -1000,7 +1001,7 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
   complete("changed-recipient");
   await cli(["sync"]);
   assert.equal(requests.length, 2);
-  assert.notEqual((await runCli(t, ["data-sharing", "model", "on", extractCode(consent)], env)).code, 0);
+  assert.notEqual((await runCliAsPerson(t, ["data-sharing", "model", "on", extractCode(consent)], env)).code, 0);
   fake.decisionServices.set("ws_acme", { ...service, revision: "restored-revision" });
   complete("restored-address");
   await cli(["sync"]);
@@ -1090,7 +1091,7 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
   const file = path.join(t.root, "selected-excerpt.txt");
   const args = [sid, "--turn", "clear", "--file", file, "--reader", "u_reader", "--purpose", "Review the proposal", "--hours", "24"];
   fs.writeFileSync(file, tags[5]);
-  assert.notEqual((await runCli(t, ["excerpt", "preview", ...args], env)).code, 0);
+  assert.notEqual((await runCliAsPerson(t, ["excerpt", "preview", ...args], env)).code, 0);
   const consentPath = "/api/v2/devices/self/data-sharing";
   let releaseOn!: () => void;
   const onHeld = new Promise<void>((resolve) => { releaseOn = resolve; });
@@ -1101,7 +1102,7 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
       await onHeld;
     }
   };
-  const enabling = runCli(t, ["data-sharing", "excerpts", "on"], env);
+  const enabling = runCliAsPerson(t, ["data-sharing", "excerpts", "on"], env);
   try {
     await waitFor(() => receivedOn, 3000, "enabled response is held");
     await cli(["data-sharing", "excerpts", "off"]);
@@ -1126,16 +1127,16 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
   assert.ok(preview.includes(JSON.stringify(tags[5])) && preview.includes("Named reader") && preview.includes("Review the proposal"));
   assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
   fs.writeFileSync(file, tags[2]);
-  assert.notEqual((await runCli(t, ["excerpt", "share", ...args, "--confirm", extractCode(preview)], env)).code, 0);
+  assert.notEqual((await runCliAsPerson(t, ["excerpt", "share", ...args, "--confirm", extractCode(preview)], env)).code, 0);
   fs.writeFileSync(file, tags[5]);
   const shareArgs = ["excerpt", "share", ...args, "--confirm", extractCode(preview)];
   for (const [flag, value] of [["--reader", "u_elsewhere"], ["--purpose", "Another purpose"], ["--hours", "48"]]) {
     const changed = [...shareArgs];
     changed[changed.indexOf(flag) + 1] = value;
-    assert.notEqual((await runCli(t, changed, env)).code, 0, flag);
+    assert.notEqual((await runCliAsPerson(t, changed, env)).code, 0, flag);
   }
   fake.excerptsBlocked = true;
-  assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+  assert.notEqual((await runCliAsPerson(t, shareArgs, env)).code, 0);
   fake.excerptsBlocked = false;
   const sentBeforeGrant = fake.requestBodies.length;
   let heldExcerptGrant = false;
@@ -1148,7 +1149,7 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
     }
   };
   try {
-    assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+    assert.notEqual((await runCliAsPerson(t, shareArgs, env)).code, 0);
     assert.equal(heldExcerptGrant, true);
     assert.doesNotMatch(JSON.stringify(fake.requestBodies.slice(sentBeforeGrant)), /EXCERPT-CANARY/);
   } finally {
@@ -1160,9 +1161,9 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
   assert.deepEqual(leaves, [{ id: `ex_${extractCode(preview).slice(14)}`, text: tags[5], purpose: "Review the proposal", readers: ["u_reader"], hours: 24 }]);
   assert.equal(requests.length, 10);
   await cli(["data-sharing", "excerpts", "off"]);
-  assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+  assert.notEqual((await runCliAsPerson(t, shareArgs, env)).code, 0);
   await cli(["data-sharing", "excerpts", "on"]);
-  assert.notEqual((await runCli(t, shareArgs, env)).code, 0, "renewed consent needs a new excerpt preview");
+  assert.notEqual((await runCliAsPerson(t, shareArgs, env)).code, 0, "renewed consent needs a new excerpt preview");
   const oldResult = ctxFor(t);
   try {
     oldResult.db.prepare("UPDATE analysis_results SET result=json_remove(result, '$.source') WHERE local_id=? AND root=?")
@@ -1203,7 +1204,7 @@ test("model and excerpt opt-ins send only their own fields, with the model runni
       await pendingReaders.promise;
     }
   };
-  const pendingShare = runCli(t, ["excerpt", "share", ...args, "--confirm", extractCode(beforeDelete)], env);
+  const pendingShare = runCliAsPerson(t, ["excerpt", "share", ...args, "--confirm", extractCode(beforeDelete)], env);
   try {
     await readersHeld.promise;
     await cli(["analysis", "delete", sid]);
