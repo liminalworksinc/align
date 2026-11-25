@@ -74,12 +74,24 @@ export const layout = {
   podFeed: (h: string, ws: string) => path.join(h, "feeds", `activity-${safe(ws)}.json`),
   /** Asks of this person's teams and their own, for one workspace (`align asks`, `align team`, the envelope). */
   asksFeed: (h: string, ws: string) => path.join(h, "feeds", `asks-${safe(ws)}.json`),
+  analysis: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.json`),
+  analysisTurn: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.turn.json`),
+  analysisSeen: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.seen.json`),
+  analysisLast: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.last.json`),
+  suggestion: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.suggestion.json`),
+  suggestionSeen: (h: string, lid: string, stage: "initial" | "move") => path.join(h, "analysis", `${safe(lid)}.${stage}.shown.json`),
+  suggestionReply: (h: string, lid: string, stage: "initial" | "move") => path.join(h, "analysis", `${safe(lid)}.${stage}.reply.json`),
+  suggestionBindPreview: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.bind-preview.json`),
+  suggestionSharePreview: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.share-preview.json`),
+  suggestionQuiet: (h: string) => path.join(h, "analysis", "quiet-folders.json"),
+  analysisEnd: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.end.json`),
   driftDir: (h: string) => path.join(h, "drift"),
   /** A local drift notice waiting for the session's next prompt. */
   drift: (h: string, lid: string) => path.join(h, "drift", `${safe(lid)}.json`),
   /** Steering lines shown, one file each, until the sync pass reports them. */
   steeringDir: (h: string) => path.join(h, "steering"),
   /** This machine's agent time outside shared sessions, last 7 days (computed by sync, read by hooks; never uploaded). */
+  pastOfferChange: (h: string) => path.join(h, "past-offer-change.json"),
   unsharedDigest: (h: string) => path.join(h, "unshared-digest.json"),
   /** The week (Monday, UTC) the unshared-work note was last shown. */
   unsharedShown: (h: string) => path.join(h, "unshared-shown.json"),

@@ -4,7 +4,7 @@ This is Align's published retention schedule. It describes what the code does: t
 `lib/v2/retention.ts`, account deletion in `lib/v2/account.ts`, workspace deletion in `lib/v2/workspaces.ts`, and the
 volume snapshots in `fly.toml`. The contract is the "Data retention" requirement in `specs/align/workspaces.md`.
 
-Align never stores prompt text, tool output or messages on the server. The `align` agent shares a session's harness, a
+By default, Align stores no prompt text, tool output or messages on the server. The `align` agent shares a session's harness, a
 hashed repository key, an optional repository alias, its times and state, its goal binding and its token usage and
 estimated cost. It sends no title.
 
@@ -12,25 +12,29 @@ estimated cost. It sends no title.
 
 | Data | Kept | Then |
 |---|---|---|
-| Prompt text, tool output, messages | Not stored on the server | Nothing to delete |
+| Full session transcripts and model check inputs | Stay outside the Align server | The configured decision recipient applies its own retention to any opted-in input |
+| Deliberate excerpts, including the selected text, purpose and named readers | Available until the chosen expiry or revocation, up to 7 days | Revocation removes access and deletes the live record at once. Expiry ends access at the chosen time. The running server removes expired text and reader access as the cutoff is reached. Access also removes expired copies when it checks the record. Session deletion and sharer removal also delete it. An opaque share ID is kept until the workspace is permanently deleted so the same share cannot be restored by replaying it. |
 | Shared sessions: harness, hashed repo key, repo alias, times, state, goal binding, binding periods, usage (model, tokens, estimated cost), the person who shared it | 13 months after the session ends: when sharing stopped, or else its last activity (its last upload, binding change or update) | Rolled up into totals per workspace, goal, UTC day, model and billing basis, with no person and no session. The raw rows (session, binding periods, usage, directive deliveries and receipts) are deleted |
 | Change-request evidence links (kind, URL, label, who added it, person or agent) and the snapshot Align records with each revision (the goal's 30-day spend, bound sessions, last activity) | The life of the change request | Deleted with the workspace. Whoever added a link becomes "Former member #n" like the rest of their rows |
 | Launch expectations and their outcome history (migration 28), including corrections, notes and evidence links | The life of the change request | Deleted with the request or workspace. The launcher and reporters become "Former member #n" like the rest of their rows |
 | Self-reported measure readings (migration 28), including value, observation time, who recorded it and when | The life of the goal, including readings for measures removed from later versions | Deleted with the goal or workspace. The reporter becomes "Former member #n" like the rest of their rows |
 | Changed element keys indexed for earlier decisions (migration 29) | The life of the change request revision | Deleted with the revision, goal or workspace |
-| Asks between teams (the team asked, the text, who asked as people said it, the meeting and date, who recorded and last decided it) and the times they came up again | Open and accepted ones while the workspace lives; a `done`, `declined` or `withdrawn` ask 13 months after its last change | Deleted by the daily job, with the times it came up again (`asks_deleted`), or with the workspace. Whoever recorded, decided or mentioned one becomes "Former member #n" like the rest of their rows |
-| Value reports on an approved change request (an estimate and an optional note of up to 500 characters, by one person) | 13 months after their last change | Deleted by the daily job (`value_reports_deleted`), with their change request, or with the workspace. Their author becomes "Former member #n" like the rest of their rows |
-| Requests to a goal's agents (type, goal and version, target goal, an optional note of up to 280 characters, who sent and cancelled it) and each session's answer | 13 months after it was sent | Deleted by the daily job (`requests_deleted`) with the directives that carried it, with their session (that session's answer), or with the workspace. Its sender becomes "Former member #n" like the rest of their rows |
-| The marker a deleted session's shared history leaves (a hash of the person who shared it and the session key, the workspace, the time; never the key or the person) | 13 months after the deletion | Deleted by the daily job (`deleted_session_markers_deleted`), or with the workspace. While it lasts, the account that shared the session is told its history is already deleted (410 `history_deleted`) when one of its devices asks to delete it again |
+| Asks between teams (the team asked, the text, who asked as people said it, the meeting and date, who recorded and last decided it) and the times they came up again | Open and accepted ones while the workspace lives; a `done`, `declined` or `withdrawn` ask 13 months after its last change | Deleted by the daily job, with the times it came up again, or with the workspace. Whoever recorded, decided or mentioned one becomes "Former member #n" like the rest of their rows |
+| Value reports on an approved change request (an estimate and an optional note of up to 500 characters, by one person) | 13 months after their last change | Deleted by the daily job, with their change request, or with the workspace. Their author becomes "Former member #n" like the rest of their rows |
+| Requests to a goal's agents (type, goal and version, target goal, an optional note of up to 280 characters, who sent and cancelled it) and each session's answer | 13 months after it was sent | Deleted by the daily job with the directives that carried it, with their session (that session's answer), or with the workspace. Its sender becomes "Former member #n" like the rest of their rows |
+| The marker a deleted session's shared history leaves (a hash of the person who shared it and the session key, the workspace, the time; never the key or the person) | 13 months after the deletion | Deleted by the daily job, or with the workspace. While it lasts, the account that shared the session is told its history is already deleted when one of its devices asks to delete it again |
 | Goal holds (who held the goal, an optional reason of up to 280 characters, when) | While the goal is held | Deleted when it is released (by a person, or when the goal is achieved or dropped) or with the workspace; the audit log keeps the history. Whoever held it becomes "Former member #n" like the rest of their rows |
 | Spend roll-ups (no person, no session) | The life of the workspace | Deleted with the workspace |
 | Activity signals (in-flight edits, commits, tasks, claims) | 24 hours (claims 1 hour) | Deleted by the daily job, or with their session |
+| Derived session findings in Mode L, with the proposed machine opt-in | Available for 30 days from the turn start | Removed at expiry by the running server, when accessed after expiry, on request or with their session |
+| Workspace decision service address and revision (migration 33) | Until an owner replaces or clears the address | Deleted at removal or with the workspace at purge |
+| Model check block and latest send deadline for each decision capability (migration 34) | Until an owner lifts the block. Each deadline is replaced by the next grant for that capability and has no effect after it expires | Both are deleted when the workspace is purged |
 | Workspace audit log | 1 year | Deleted |
 | A person who leaves or is removed | Their access ends at once: team places, device access and connected AI apps for that workspace. Their goals, sessions and history stay under their name for 30 days | After 30 days they are shown as "Former member #n" (numbered per workspace) in every row of that workspace, the audit log included; their sessions no longer point at their device, invites to or accepted by them are deleted, so their email leaves the workspace, and the keyed hash that stood for them is cleared from that workspace's product events. Their account stays until they delete it |
 | Sessions of a removed member, if the owner ticks "Also delete their shared sessions in this workspace now" | Deleted at removal | Spend already rolled up stays |
 | An account, when its owner deletes it (`/app/account`) | Deleted at once | Their memberships end as above, and in every workspace their rows become "Former member #n" at once. Their product events lose the keyed hash that stood for them. Their devices, sign-in sessions, linked sign-in methods, passkeys (with when each was last used), their answer to the "add a passkey" prompt, codes, access requests, unused creation codes bound to their email, email-keyed rate-limit counters and the account are deleted. A workspace where they were the only member is deleted with it (see the next row). The audit records that an account was deleted, with no name or email. Refused while they are the only owner of a workspace that has other members |
 | A deleted workspace (by an owner, with the account of its only member, or by the operator) | 30 days, during which its owners can restore it from Your workspaces | Every row is deleted by the daily job on day 30 or within the 24 hours after, its audit included (its content-free product events stay, under a random id, until their own 13 months are up). The operator can erase one at once (`align-admin workspaces delete <ws> --purge --yes`) |
-| Fly.io volume snapshots (hosted) | Daily snapshots, each kept 7 days (`fly.toml`: `scheduled_snapshots = true`, `snapshot_retention = 7`) | Expire, so deleted data leaves the snapshots within 7 days. A purged workspace is gone from every copy within 38 days of its deletion |
+| Fly.io volume snapshots (hosted) | Daily snapshots, each kept seven days | Expire, so deleted data leaves the snapshots within 7 days. A purged workspace is gone from every copy within 38 days of its deletion |
 | Off-site backups | None are made | |
 | Email sign-in codes | 5 minutes, 3 attempts | Deleted by the daily job once expired |
 | Sign-in sessions (with the client IP address and user agent when hosted) | 7 days, extended while used, and never more than 30 days after the sign-in (`ALIGN_SESSION_MAX_DAYS`). Signing out everywhere ends them all at once | A session past the 30 days is deleted when it is next presented; the daily job deletes the rest once expired or past the 30 days |
@@ -46,7 +50,16 @@ estimated cost. It sends no title.
 | AI apps that registered themselves (`_oauth_clients.json`: an app's name and redirect addresses, nothing about people) | Kept | |
 | Server logs | When hosted, Align logs no request body, path, address, email or code; a server error logs only its error name, and the retention job logs counts only | Fly.io keeps a machine's log output on its platform for a limited time; Align keeps no copy |
 | Email provider message logs | The provider's own retention (set it to the shortest it offers) | The provider deletes them |
-| Local mode (Mode L) | Everything stays in `data/v2/align.sqlite` on the person's own machine; nothing is sent to Align | The same job runs there, on that machine |
+| Local mode (Mode L) | Align keeps its records in `data/v2/align.sqlite` on the person's own machine. Separately enabled goal suggestions and limit checks go directly to the chosen service | The same job runs there, on that machine |
+
+## Erasing excerpt text from live storage
+
+When Align deletes an excerpt, it overwrites the freed database content and clears the database's temporary log
+before returning when the database is available for cleanup. If a connection holds the log open, someone with
+access to the database files may still be able to read the old text. After a blocked attempt, the app retries every second while
+running and tries again at startup. A blocked manual cleanup is picked up on the server's next write or daily
+retention pass. Erasure happens on the next unblocked attempt, so a connection that holds the log open can
+extend the time. Hosted volume snapshots expire on the schedule above.
 
 ## When the job runs
 
@@ -62,5 +75,5 @@ estimated cost. It sends no title.
   `node scripts/align-admin.mjs workspaces delete <ws> --purge --yes`, the same purge the job does on day 30.
 - Each step is its own short transaction and running the job again changes nothing.
 
-Deleted data can't be recovered by Align once the job has removed it: Align keeps no other copy than the volume
-snapshots above.
+The app no longer serves deleted records after the job has removed them. See the live-storage and volume snapshot
+rules above for copies that can outlast deletion.

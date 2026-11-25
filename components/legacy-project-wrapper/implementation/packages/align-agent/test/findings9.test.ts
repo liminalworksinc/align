@@ -162,6 +162,7 @@ describe("cycle 8, section 5: works, but would confuse a developer", () => {
     const again = prompt(t, A.sid, "::align share", A.cwd).reason as string;
     assert.doesNotMatch(again, /already shared/);
     assert.match(again, /a session whose sharing was stopped is not shared again, so it stays stopped/);
+    prompt(t, A.sid, "::align share --dir", A.cwd);
     assert.match(prompt(t, A.sid, "::align share --dir confirm", A.cwd).reason, /This session stays private: its sharing was stopped/);
     const sessions = await runCli(t, ["sessions"]);
     assert.doesNotMatch(sessions.stdout.split("\n").find((l) => l.startsWith(A.lid.slice(0, 8))) ?? "", /\bshared\b(?! before)/);
@@ -173,6 +174,7 @@ describe("cycle 8, section 5: works, but would confuse a developer", () => {
     fake.removeAndReAdd(B.key);
     await sync(t);
     assert.match(prompt(t, B.sid, "go on", B.cwd)?.systemMessage ?? "", /you were removed from Acme in Align \(or left it\) while this machine was not in touch/);
+    prompt(t, B.sid, "::align share", B.cwd);
     assert.match(prompt(t, B.sid, "::align share confirm", B.cwd).reason, /sharing requested/);
     await sync(t);
     await sync(t);
@@ -211,6 +213,7 @@ describe("cycle 8, section 5: works, but would confuse a developer", () => {
     const moved = await runCli(t, ["share", lid8, "--workspace", "Side Co", "--goal", "none", "--yes"]);
     assert.equal(moved.code, 1);
     assert.equal(moved.stderr.trim(), `align: session ${lid8} was not shared: this session was shared with Acme, so it is shared again only there (its work is that workspace's), never into Side Co.`);
+    prompt(t, A.sid, "::align share", A.cwd);
     assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested toward "Ship the v2 onboarding flow"/);
     await sync(t);
     assert.equal(hot(t, A.lid).share?.state, "shared");

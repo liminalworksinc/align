@@ -270,6 +270,12 @@ function mtimeOf(file: string): number {
   }
 }
 
+export function changedSinceToolStart(file: string, evidence: Expect): boolean {
+  if (evidence.no) return false;
+  if (evidence.h === undefined) return shows(file, evidence);
+  return contentKey(file, { bytes: MAX_READ }) !== evidence.h;
+}
+
 /** Whether the file now shows what the call was to do. */
 export function shows(file: string, e: Expect): boolean {
   if (e.no) return false;
@@ -352,6 +358,7 @@ export function happened(a: Act, v: Verdicts, confirmed: boolean, lazy: Lazy | n
     return !a.c && !!lazy && !!a.d && !!a.s && Date.now() - Date.parse(a.at) < PENDING_MS && committed(a.d, a.s, a.at, a.rl);
   }
   if (a.t !== "edit" || a.via || !a.p) return true;
+  if (a.v?.no) return false;
   const d = verdictFor(a, v);
   if (d !== null) {
     // A `ran` for a whole shell command (an older build's) still needs its file changed.
@@ -472,9 +479,9 @@ export function reflogMark(dir: string): number | null {
  * environment) can set to any time. Without one (a line an older build wrote), a line dated at or after `at`, less a
  * minute, counts. A reflog shorter than the mark (expired or rewritten) falls back to the dates.
  */
-function committed(dir: string, subject: string, at: string, mark?: number): boolean {
+function matchingCommits(dir: string, subject: string, at: string, mark?: number): string[] {
   const g = gitDir(dir);
-  if (!g) return false;
+  if (!g) return [];
   let text = "";
   let byMark = false;
   try {
@@ -492,14 +499,26 @@ function committed(dir: string, subject: string, at: string, mark?: number): boo
       fs.closeSync(fd);
     }
   } catch {
-    return false;
+    return [];
   }
   const since = Math.floor(Date.parse(at) / 1000) - 60;
+  const commits = new Set<string>();
   for (const line of text.split("\n")) {
-    const m = /^[0-9a-f]+ [0-9a-f]+ .*> (\d+) [+-]\d{4}\tcommit(?: \([^)]*\))?: (.*)$/.exec(line);
-    if (m && (byMark || Number(m[1]) >= since) && m[2].trim().slice(0, 120) === subject) return true;
+    const m = /^[0-9a-f]+ ([0-9a-f]+) .*> (\d+) [+-]\d{4}\tcommit(?: \([^)]*\))?: (.*)$/.exec(line);
+    if (m && (byMark || Number(m[2]) >= since) && m[3].trim().slice(0, 120) === subject) commits.add(m[1]);
   }
-  return false;
+  return [...commits];
+}
+
+function committed(dir: string, subject: string, at: string, mark?: number): boolean {
+  return matchingCommits(dir, subject, at, mark).length > 0;
+}
+
+/** Limit checks need one attributable commit and its paths, not just a subject that appeared in the reflog. */
+export function attributedCommit(a: Act): string | null {
+  if (a.t !== "commit" || a.rl === undefined || !a.d || !a.s || (reflogMark(a.d) ?? -1) < a.rl) return null;
+  const matches = matchingCommits(a.d, a.s, a.at, a.rl);
+  return matches.length === 1 && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(matches[0]) ? matches[0] : null;
 }
 
 /**

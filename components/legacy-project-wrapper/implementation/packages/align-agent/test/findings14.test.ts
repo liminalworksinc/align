@@ -300,6 +300,7 @@ describe("cycle 13, section 5: works, but would confuse a developer", () => {
   test("`::align share --dir none confirm` makes a no-goal rule and never says the next prompt carries the goal", async () => {
     const { t } = await world();
     const s = session(t);
+    prompt(t, s, "::align share --dir none");
     const done = prompt(t, s, "::align share --dir none confirm").reason as string;
     assert.match(done, /are now shared with Acme\. This session too, with no goal \(its usage counts as unallocated\)\./);
     assert.doesNotMatch(done, /carries the goal/);
@@ -332,6 +333,7 @@ describe("cycle 13 follow-up: a share asked for after Stop sharing on the web", 
     said(t, S);
     fake.stopOnWeb(S.key);
     const before = puts(fake, S).length;
+    prompt(t, S, "::align share");
     assert.match(prompt(t, S, "::align share confirm").reason, /^Align: sharing requested toward/);
     await sync(t);
     assert.equal(puts(fake, S).length, before, "no share sent");
@@ -348,6 +350,7 @@ describe("cycle 13 follow-up: a share asked for after Stop sharing on the web", 
     await logout(t);
     await login(t);
     said(t, S);
+    prompt(t, S, "::align share");
     prompt(t, S, "::align share confirm");
     fake.beforeRequest = (m, p) => {
       if (m === "PUT" && p.endsWith(`/sessions/${S.key}`)) {

@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+import { DECISION_PROVIDERS, decisionService, sameDecisionService, type DecisionService } from "./decision-model.ts";
+import { suggestionConsent } from "./goal-suggestions.ts";
+import { saveSuggestionReply, shownGoalSuggestion } from "./hooks/goal-suggestions.ts";
+import { deleteAnalysis, inspectAnalysis, analysisSharingAllowed, configuredModelCheck, modelConsentPreview, setModelChecks, setGoalSuggestionConsent, setResultsEnabled } from "./analysis.ts";
+import { EVIDENCE_WORDS, RESULTS_PREVIEW, signalsPreview } from "./shared/analysis.ts";
+import { excerptReadersOnMachine, excerptSharingOn, prepareExcerpt, setExcerptSharing, terminalText } from "./excerpts.ts";
 // `align` CLI. Works offline for local metering; server features need `align login`.
 import { measureCommand } from "./measure.ts";
 import { execFile, spawnSync } from "node:child_process";
@@ -39,14 +45,14 @@ import { endedWhyWords, latchWayOut, shareAgainWords, STOP_HOLDS_NO_SHARE } from
 import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
 import { resolvePaths, type Paths } from "./paths.ts";
 import { fetchAsks } from "./asks.ts";
-import { settleActivity, uploadActivity, waitingActivity } from "./activity.ts";
+import { settleActivity, signalsAllowed, uploadActivity, waitingActivity } from "./activity.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, POST_FLAG, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
+import { applyShare, bind, enqueue, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, myTeams, readAsks } from "./shared/asks.ts";
 import { gitInfo, manualShareOrigin } from "./shared/anchors.ts";
-import { readJson } from "./shared/fsx.ts";
+import { readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { contextAddedLine, readContextCost } from "./shared/context-cost.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
@@ -55,10 +61,11 @@ import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type Last
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
-import { kvGet, kvSet } from "./db.ts";
+import { kvGet, kvSet, nowIso } from "./db.ts";
 import { agentMayRead, podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
-import { clean, GOAL_MARKS, goalMark, HELD_MARK, keptHoldsNote, otherWorkspaceWords, outOfReachWords, quoted, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
+import type { SuggestionOrigin, SuggestionReply } from "./shared/goal-suggestions.ts";
+import { clean, GOAL_MARKS, LIMIT_WORDS, goalMark, HELD_MARK, keptHoldsNote, otherWorkspaceWords, outOfReachWords, quoted, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
 import { feedHold } from "./shared/feedhold.ts";
 import type { RequestState, WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
@@ -93,6 +100,20 @@ const HELP = `align ${VERSION}: Align local agent
   align measure revoke <workspace-id> <goal-id> <measure-id>
   align asks [--workspace <name|id>] [--all] [--json]   what other teams asked of your teams, and your own asks (offline)
   align config [drift on|off]  local settings; drift: a user-only note when a reply may conflict with a goal's limit
+  align data-sharing           show what this machine can share and how to change it
+  align data-sharing signals <session> [on|off]
+  align data-sharing results on|off
+  align data-sharing session-question on|off
+  align data-sharing decision-model on [typesafe|openai|google|workspace] [--workspace <name>]
+  align data-sharing decision-model off [--workspace <name>]
+  align analysis show <session> [--json]
+  align analysis delete <session>
+  align data-sharing model preview|off [--workspace <name>]
+  align data-sharing model on <preview code> [--workspace <name>]
+  align data-sharing excerpts on|off
+  align excerpt readers <session>
+  align excerpt preview|share <session> --turn <id> --file <path> --reader <id> --purpose <text> --hours <n>
+    For share, include --confirm <preview code>. Repeat --reader to add a reader.
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
@@ -1045,16 +1066,45 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const goal = await goalFor(ctx, ws.id, values.goal);
   // Shared before, also when its shared history was deleted since: this share counts from now (C6-1).
   const effectiveFrom = from === "start" && sharedBefore(ctx, session.local_id) ? "now" : from;
-  const origin = manualShareOrigin(ctx.home, session.local_id, ws.id, goal?.id);
+  const offered = shownGoalSuggestion(ctx.home, session.local_id, "initial", loadFeed(ctx.home, ws.id), null);
+  const suggested = offered?.goals.some((g) => g.id === goal?.id) ? offered.suggestion.origin : null;
+  const origin = suggested ?? manualShareOrigin(ctx.home, session.local_id, ws.id, goal?.id);
   const plan = planShare(ctx, session.local_id, ws, goal, values.alias ?? null, effectiveFrom, origin);
   out(renderPreview(plan));
   out(signalsPreview(!!values.signals));
+  out(RESULTS_PREVIEW);
   if (effectiveFrom !== from) out("This session was shared before, so this share counts from now.");
+  const previewPath = layout.suggestionSharePreview(ctx.home, session.local_id) + ".cli";
+  const device = loadCredentials(ctx.home)?.device_id;
+  const scope = JSON.stringify([device, ws.id, ws.name, goal?.id, goal?.version, goal?.title, effectiveFrom,
+    values.alias ?? null, !!values.signals, offered?.suggestion ?? null]);
+  const pending = readJson<{ scope: string; expires: number }>(previewPath);
+  const hookPreview = readJson<{ choice?: { suggestion?: unknown } } | true>(layout.suggestionSharePreview(ctx.home, session.local_id));
+  const needsPreview = !!pending || !!readJson(layout.suggestionSeen(ctx.home, session.local_id, "initial"))
+    || hookPreview === true || !!hookPreview?.choice?.suggestion;
+  if (values.yes && needsPreview && (pending?.scope !== scope || pending.expires < Date.now())) {
+    throw new UsageError("Review the current sharing preview before running again with --yes.");
+  }
   if (!(await confirm("Share this session?", !!values.yes))) {
+    if (needsPreview) writeJsonAtomic(previewPath, { scope, expires: Date.now() + 600_000 });
     out("Not shared. Run again with --yes to confirm.");
     return;
   }
+  if (!signedIn(ctx.home) || device !== loadCredentials(ctx.home)?.device_id) {
+    throw new UsageError("The machine's pairing changed. Run align share again for a new preview.");
+  }
+  if (offered) {
+    const feed = loadFeed(ctx.home, ws.id);
+    const current = shownGoalSuggestion(ctx.home, session.local_id, "initial", feed, null);
+    const selected = goal ? feed?.goals.find((entry) => entry.id === goal.id && entry.bindable && entry.status === "active") : null;
+    if (JSON.stringify(current?.suggestion) !== JSON.stringify(offered.suggestion) ||
+      (goal && (selected?.version !== goal.version || selected.title !== goal.title))) {
+      throw new UsageError("The goal suggestion changed. Run `align share` again for a new preview.");
+    }
+  }
+  if (pending) removeFile(previewPath);
   applyShare(ctx, plan);
+  if (offered) saveSuggestionReply(ctx.home, session.local_id, "initial", suggested ? "accepted" : "changed", goal?.id ?? null, nowIso());
   kvSet(ctx.db, `signals:${session.local_id}`, values.signals ? "1" : "0");
   await tryFlush(ctx);
   const after = getShare(ctx, session.local_id);
@@ -1070,11 +1120,7 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 /** What team awareness sends, with and without the user's consent to share names. */
-function signalsPreview(on: boolean): string {
-  return on
-    ? "Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who\ncan read the goal, kept 24 hours, so their agents can avoid overlapping work. File contents are never sent."
-    : "Work signals OFF: only keyed hashes of edited files are sent, so overlapping edits can be flagged without names.\nAdd --signals to share file paths, commit subjects and task labels with people who can read the goal.";
-}
+
 
 const HARNESS_NAME: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
 
@@ -1096,6 +1142,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
   out("Sent per session: harness, a keyed repo hash, start time, binding epochs, per-request token counts with model, basis and");
   out(`estimated list cost. Never sent: prompts, responses, tool input or output${signals ? "" : ", paths, branch names"}.`);
   out(signalsPreview(signals));
+  out(RESULTS_PREVIEW);
   const prev = matchRule(readRules(ctx.home), dir);
   if (prev && prev.dir === dir) out(`This replaces the current rule (${prev.workspace_name}${prev.goal_title ? `, "${prev.goal_title}"` : ""}).`);
   // --past: sessions already metered on this machine whose own folders are all inside this one, each from its start.
@@ -1108,7 +1155,11 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
     if (past.deleted) out(`Skipped ${past.deleted} whose shared history was deleted (on the web or with \`align delete-history\`); \`align share <session>\` shares one again, counting from now, if you want.`);
     if (past.take.length) out("Each is shared from its own start with the fields above; nothing it said is sent.");
   }
+  const device = loadCredentials(ctx.home)?.device_id;
   if (!(await confirm(past?.take.length ? "Share this folder and these sessions?" : "Share this folder?", yes))) return out("Not changed. Run again with --yes to confirm.");
+  if (!signedIn(ctx.home) || device !== loadCredentials(ctx.home)?.device_id) {
+    throw new UsageError("The machine's pairing changed. Run align share again for a new preview.");
+  }
   setRule(ctx.home, { dir, workspace_id: ws.id, workspace_name: ws.name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null, signals });
   out(`New sessions in ${dir} will be shared with ${ws.name}${goal ? ` for "${goal.title}"` : ""}${signals ? ", with work signals" : ""}.`);
   if (!past?.take.length) return;
@@ -1209,6 +1260,246 @@ async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
   if (all.some((a) => a.asks.some((x) => !x.read_only))) out("Accept, decline or mark done in the web app.");
 }
 
+async function cmdDataSharing(ctx: Ctx, args: string[]) {
+  let workspace = ctx.config.default_workspace;
+  const workspaceFlag = args.indexOf("--workspace");
+  if (workspaceFlag >= 0) {
+    if (!["decision-model", "model"].includes(args[0]) || workspaceFlag !== args.length - 2) throw new UsageError(commandHelp("data-sharing"));
+    workspace = args[workspaceFlag + 1];
+    args = args.slice(0, workspaceFlag);
+  }
+  const ws = resolveWorkspace(ctx.home, workspace);
+  if (!args.length) {
+    const server = loadCredentials(ctx.home)?.server_url ?? ctx.config.server_url;
+    out(`0  Metadata. Sharing a session sends usage counts, model, estimates, binding details and hashes to Align at ${server}. Use align stop-sharing <session> to stop.`);
+    out("1  Work signals. Off unless chosen for a session or folder. Repo-relative paths, commit subjects, task or claim labels and branch names go to Align and people who can read the goal. Use align data-sharing signals <session> off for a session, or replace a folder rule without --signals for future sessions. Turn off work signals separately for each existing session.");
+    out(`2  Derived results (proposed). ${analysisSharingAllowed(ctx, 2) ? "On" : "Off"} on this machine. Only a local Align server (Mode L) can receive finding ids, binding and limit ids, goal versions, turn start times, evidence labels and keyed digests. Only the sharing device can read them and they expire after 30 days. Findings stay on this machine with hosted Align. Use align data-sharing results off to turn it off.`);
+    out(`3  Session question (proposed). ${suggestionConsent(ctx, "session") ? "On" : "Off"}. A fork can send eligible goal ids and titles and use tokens only when the original provider and account are known and can be kept for the fork. Turn off with align data-sharing session-question off.`);
+    const choices = (loadMe(ctx.home)?.workspaces ?? []).flatMap(({ id, name }) => {
+      const suggestion = suggestionConsent(ctx, "provider", id)?.service;
+      const check = configuredModelCheck(ctx, id);
+      return suggestion || check ? [{ id, name, suggestion, check }] : [];
+    });
+    const statuses = await Promise.all(choices.map(async ({ id, name, suggestion, check }) => {
+      const policy = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(id)}/data-sharing`, {
+        timeoutMs: 750, redirect: "error",
+      }).catch(() => null);
+      const saved = decisionService("workspace", policy?.json?.decision_service);
+      const blockedTiers = policy?.json?.blocked;
+      const status = (service: DecisionService | undefined, blocked: boolean) => {
+        if (!service) return null;
+        if (policy?.status === 403 || policy?.status === 404) return `${name}: permission expired`;
+        if (policy?.status !== 200 || !Array.isArray(blockedTiers)) return `${name}: current permission unknown`;
+        if (service.provider === "workspace" && !sameDecisionService(service, saved)) return `${name}: consent expired`;
+        if (blocked) return `${name}: blocked by the workspace`;
+        const provider = DECISION_PROVIDERS[service.provider].label;
+        return `${name}: on with ${provider}${service.provider === "workspace" ? ` at ${service.endpoint}` : " using your key"}`;
+      };
+      return {
+        suggestion: status(suggestion, Array.isArray(blockedTiers) && blockedTiers.includes(3)),
+        check: status(check, policy?.json?.model_check_blocked === true),
+      };
+    }));
+    const enabled = statuses.flatMap((entry) => entry.suggestion ?? []);
+    const checks = statuses.flatMap((entry) => entry.check ?? []);
+    out(`3  Decision model (proposed). ${enabled.join("; ") || "Off"}. The selected service receives the first prompt, branch, saved repo alias and eligible goal ids and titles. Turn off with align data-sharing decision-model off --workspace <name>.`);
+    out(`3  Model limit checks (proposed). ${checks.join("; ") || "Off"}. The workspace decision service receives the last assistant reply and the wording and types of selected limits. Use align data-sharing model preview to review the recipient or align data-sharing model off to turn it off.`);
+    out(`4  Excerpts (proposed). ${excerptSharingOn(ctx) ? "On" : "Off"}. Align receives the confirmed passage, purpose, named readers and expiry. You and the named readers can open it until revocation or expiry, up to seven days. Use align data-sharing excerpts off to turn off new shares.`);
+    out("5  Central logs (proposed). Hosted workspaces cannot receive transcripts. This version reads the transcript locally from its original file.");
+    return;
+  }
+  const [option, ref, choice, extra] = args;
+  if (option === "signals" && ref && !extra) {
+    ingestSpool(ctx);
+    const session = resolveSession(ctx, ref);
+    if (!choice) return out(`Work signals ${signalsAllowed(ctx, session.local_id) ? "on" : "off"} for this session on this machine.`);
+    if (choice === "on" || choice === "off") {
+      kvSet(ctx.db, `signals:${session.local_id}`, choice === "on" ? "1" : "0");
+      const share = getShare(ctx, session.local_id);
+      if (choice === "off" && share && share.state !== "error") {
+        enqueue(ctx, session.local_id, "work_signals_off", { ws: share.workspace_id, session_key: share.session_key });
+        await tryFlush(ctx);
+      }
+      return out(`Work signals ${choice} for this session on this machine. The workspace can block them.`);
+    }
+  }
+  if (option === "results" && (ref === "on" || ref === "off") && !choice) {
+    const status = await setResultsEnabled(ctx, ref === "on");
+    if (status === "unavailable") return out("Hosted Align cannot receive derived findings. They stay on this machine.");
+    return out(`Derived results ${ref} on this machine.${status === "pending" ? " The server has not acknowledged the choice. The next sync retries." : ""}`);
+  }
+  if (option === "session-question" && (ref === "on" || ref === "off") && !choice) {
+    await setGoalSuggestionConsent(ctx, "session", undefined, ref === "on");
+    return out(ref === "on"
+      ? "Session questions on for this machine where the workspace allows them. The current integrations skip forks because they cannot keep the original provider and account for the fork."
+      : "Session questions off for this machine.");
+  }
+  if (option === "decision-model" && (ref === "on" || (ref === "off" && !choice))) {
+    if (!ws) throw new UsageError("Choose a workspace with --workspace <name>.");
+    if (choice === "workspace" && extra) throw new UsageError("The workspace owner sets the decision service address in People.");
+    if (extra) throw new UsageError(commandHelp("data-sharing"));
+    if (ref === "off") {
+      await setGoalSuggestionConsent(ctx, "provider", ws.id, false);
+      return out(`Decision model suggestions off for ${ws.name} on this machine.`);
+    }
+
+    await needLogin(ctx);
+    const unbind = bindDevice(ctx);
+    try {
+      let configured: unknown;
+      if (choice === "workspace") {
+        const policy = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/data-sharing`, { timeoutMs: 750 });
+        if (policy.status === 404) throw new UsageError("This workspace is out of reach.");
+        if (policy.status !== 200) throw new UsageError("Couldn't read the workspace's decision service address.");
+        configured = policy.json?.decision_service;
+      }
+      const service = decisionService(choice ?? "typesafe", configured);
+      if (!service) throw new UsageError(choice === "workspace"
+        ? "Ask the workspace owner to set a decision service address in People."
+        : "Choose a listed decision service.");
+      await setGoalSuggestionConsent(ctx, "provider", ws.id, true, service);
+      const provider = DECISION_PROVIDERS[service.provider];
+      const recipient = service.provider === "workspace" ? `${provider.label} at ${service.endpoint}` : `Your choice of ${provider.label}`;
+      return out(`Decision model suggestions on for ${ws.name} on this machine, where the workspace allows them. ${recipient} receives the first prompt, branch when known, saved repo alias and eligible goal ids and titles. Supply your key as ${provider.key} in the local worker's environment.`);
+    } finally {
+      unbind();
+    }
+  }
+  if (option === "model" && !extra) {
+    if (ref === "preview" && !choice) {
+      if (!ws) throw new UsageError("Choose a workspace with --workspace <name>.");
+      const { endpoint, code } = await modelConsentPreview(ctx, ws.id);
+      out(`Decision recipient ${terminalText(endpoint)} for ${terminalText(ws.name)}.`);
+      out("After sync, this endpoint receives the last assistant reply (up to 2,000 UTF-8 bytes), the wording and types of up to ten limits, and fixed questions. The reply may mention private details. The request includes a key for this endpoint.");
+      out("It sends no separate prompt, earlier reply, tool call or result, workspace or session identifier, or feedback. A workspace owner can block these requests.");
+      return out(`To allow this on this machine, run align data-sharing model on ${code} --workspace ${ws.id}. To stop it, run align data-sharing model off --workspace ${ws.id}.`);
+    }
+    if ((ref === "off" && !choice) || (ref === "on" && choice)) {
+      if (!ws) throw new UsageError("Choose a workspace with --workspace <name>.");
+      await setModelChecks(ctx, ws.id, choice);
+      return out(`Model limit checks ${ref} on this machine for ${ws.name}.`);
+    }
+  }
+  if (option === "excerpts" && (ref === "on" || ref === "off") && !choice) {
+    const saved = await setExcerptSharing(ctx, ref === "on");
+    return out(`Excerpt sharing ${ref} on this machine.${saved ? "" : " Sign in and repeat this command to also turn it off at Align."}`);
+  }
+  throw new UsageError(commandHelp("data-sharing"));
+}
+
+const SUGGESTION_SOURCE: Record<SuggestionOrigin, string> = {
+  suggested_rule: "Local rules",
+  suggested_agent: "Session question",
+  suggested_model: "Decision service",
+};
+
+const SUGGESTION_RESPONSE: Record<SuggestionReply, string> = {
+  accepted: "Accepted",
+  changed: "Chose a different goal",
+  wrong: "Marked as the wrong goal",
+  dismissed: "Dismissed",
+  quiet: "Turned off suggestions for this folder",
+};
+
+function showAnalysis(ctx: Ctx, report: ReturnType<typeof inspectAnalysis>) {
+  if (!report.turns.length && !report.suggestions.length && !report.suggestion_feedback.length && !report.feedback.length &&
+      !report.sent.length && !report.delivery_unknown.length && !report.delivery_refused && !report.upload_pending && !report.deletion_pending) {
+    return out("No transcript analysis recorded.");
+  }
+  for (const turn of report.turns) {
+    const goal = turn.goal;
+    const binding = goal ? ` · ${goal.title ? `${quoted(goal.title, 80)}, ` : ""}goal version ${goal.version}` : "";
+    out(`Turn started ${shortTime(turn.started_at)}${binding}`);
+    const labels = { replies: "Replies", calls: "Tool calls", results: "Tool results" } as const;
+    for (const field of ["replies", "calls", "results"] as const) {
+      const n = turn.records?.[field];
+      const lowerBound = turn.records?.lower_bounds?.includes(field);
+      const count = n === undefined || (lowerBound && n === 0) ? "unknown" : `${lowerBound ? "at least " : ""}${n}`;
+      out(`  ${labels[field]}: ${count}`);
+    }
+    const server = loadCredentials(ctx.home)?.server_url;
+    if (turn.findings.length && goal?.workspace && server) {
+      out(`  To discuss a limit, open the goal and contact its owner. ${server.replace(/\/$/, "")}/app/w/${encodeURIComponent(goal.workspace)}/goals/${encodeURIComponent(goal.id)}`);
+    }
+    for (const finding of turn.findings) {
+      if ("reply" in finding) out(`  Final reply evidence: ${finding.reply === null ? "Unknown" : terminalText(String(finding.reply))}`);
+      out(`  ${LIMIT_WORDS[finding.limit.type]} ${quoted(finding.limit.text, 160)}. ${EVIDENCE_WORDS[finding.evidence]}`);
+    }
+  }
+  if (report.feedback.length) {
+    out("Feedback on this machine");
+    for (const f of report.feedback) {
+      const version = typeof f.version === "number" ? ` · goal version ${f.version}` : "";
+      out(`  ${f.kind === "wrong" ? "False alarm" : "Missed check"} · ${shortTime(String(f.at))}${version}`);
+    }
+  }
+  const rendered = new Set();
+  for (const suggestion of report.suggestions) {
+    const goals = loadFeed(ctx.home, suggestion.workspace)?.goals ?? [];
+    const title = (id: string) => clean(goals.find((g) => g.id === id)?.title, 100) || "Unknown goal";
+    const names = suggestion.candidates.map(title);
+    const reply = report.suggestion_feedback.find((row) => row.stage === suggestion.stage);
+    out(`${suggestion.stage === "move" ? "Suggested switch" : "Suggested goal"} at ${suggestion.at}. ${names.length ? names.join(", ") : "No clear choice"}.`);
+    out(`  Source: ${SUGGESTION_SOURCE[suggestion.origin]}.`);
+    out(`  Response: ${reply ? SUGGESTION_RESPONSE[reply.reply] : "No response"}${reply?.chosen ? ` (${title(reply.chosen)})` : ""}.`);
+    if (reply) rendered.add(reply);
+  }
+  for (const reply of report.suggestion_feedback) {
+    if (!rendered.has(reply)) out(`Suggestion response at ${reply.at}. ${SUGGESTION_RESPONSE[reply.reply]}.`);
+  }
+  if (report.sent.length) out(`Align acknowledged ${report.sent.length} finding${report.sent.length === 1 ? "" : "s"}. Use --json to see the exact records.`);
+  if (report.delivery_unknown.length) out("Align has not confirmed whether some findings arrived.");
+  if (report.delivery_refused) out("Align declined one or more findings.");
+  if (report.upload_pending) out("Some findings are waiting to be sent.");
+  if (report.deletion_pending) out("Deletion at Align is pending.");
+}
+
+async function cmdExcerpt(ctx: Ctx, args: string[]) {
+  const help = commandHelp("excerpt");
+  const [action, ref, ...flags] = args;
+  if (!ref || !["readers", "preview", "share"].includes(action)) throw new UsageError(help);
+  ingestSpool(ctx);
+  const session = resolveSession(ctx, ref);
+  if (action === "readers") {
+    if (flags.length) throw new UsageError(help);
+    const readers = await excerptReadersOnMachine(ctx, session.local_id);
+    if (!readers.length) return out("There are no other people in this workspace.");
+    for (const { id, name } of readers) out(`${id}  ${terminalText(name)}`);
+    return;
+  }
+  const { values } = parseArgs({ args: flags, options: {
+    turn: { type: "string" }, file: { type: "string" }, reader: { type: "string", multiple: true },
+    purpose: { type: "string" }, hours: { type: "string" }, confirm: { type: "string" },
+  } });
+  const { turn, file, reader, purpose, hours, confirm } = values;
+  if (!turn || !file || !reader || !purpose || !hours || (action === "share" ? !confirm : !!confirm)) throw new UsageError(help);
+  const result = await prepareExcerpt(ctx, session.local_id, { turn, file, purpose, readerIds: reader, hours: Number(hours) }, confirm);
+  const page = `${result.server.replace(/\/$/, "")}/app/w/${encodeURIComponent(result.ws)}/sessions/excerpts`;
+  if ("id" in result) return out(`Excerpt shared through ${result.expiresAt}. To revoke it, open ${page}`);
+  out(`Destination ${page}`);
+  out(`Readers ${result.readers.map(({ id, name }) => `${terminalText(name)} (${id})`).join(", ")}`);
+  out(`Purpose ${terminalText(result.purpose)}`);
+  out(`Expires ${result.hours} hour(s) after Align accepts it.`);
+  out(`Exact excerpt (escaped) ${terminalText(result.text)}`);
+  out(`To share this text, repeat the command with share instead of preview and add --confirm ${result.code}.`);
+}
+
+async function cmdAnalysis(ctx: Ctx, args: string[]) {
+  const [action, ...rest] = args;
+  const { values, positionals: [ref, extra] } = parseSessionArgs(ctx, "analysis", rest, { json: { type: "boolean" } });
+  if ((action !== "show" && action !== "delete") || !ref || extra || (action === "delete" && values.json)) {
+    throw new UsageError(commandHelp("analysis"));
+  }
+  ingestSpool(ctx);
+  const session = resolveSession(ctx, ref);
+  if (action === "show") {
+    const report = inspectAnalysis(ctx, session.local_id, true);
+    return values.json ? out(JSON.stringify(report, null, 2)) : showAnalysis(ctx, report);
+  }
+  const deleted = await deleteAnalysis(ctx, session.local_id);
+  out(deleted ? "Analysis deleted." : "Local analysis deleted. Deletion at Align is pending.");
+}
+
 /** `align config` prints local settings; `align config drift on|off` turns the local drift notice on or off. */
 async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
   const [key, value] = argv;
@@ -1227,7 +1518,7 @@ async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
   saveConfig(ctx.home, { drift: value === "on" });
   out(
     value === "on"
-      ? "Drift notice on: after each turn of a shared session whose goal has limits, the reply is checked on this machine and you see a note if it may conflict with one. Nothing is sent or added to the agent's context."
+      ? "Drift notice on: after each turn of a shared session whose goal has limits, the reply is checked on this machine and you see a note if it may conflict with one. The reply stays on this machine."
       : "Drift notice off.",
   );
 }
@@ -1281,14 +1572,46 @@ async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdBind(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseSessionArgs(ctx, "bind", argv, { goal: { type: "string" } });
+  const { values, positionals } = parseSessionArgs(ctx, "bind", argv, { goal: { type: "string" }, yes: { type: "boolean", short: "y" } });
   prepare(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
   const s = resolveSession(ctx, positionals[0]);
   const share = getShare(ctx, s.local_id);
   if (!share) throw new UsageError("session is not shared; run `align share` first");
   const goal = await goalFor(ctx, share.workspace_id, values.goal);
-  bind(ctx, s.local_id, goal, "hand");
+  const offered = shownGoalSuggestion(ctx.home, s.local_id, "move", loadFeed(ctx.home, share.workspace_id), share.binding_goal);
+  const suggested = offered?.goals.some((g) => g.id === goal?.id) ? offered.suggestion.origin : null;
+  const hookPreview = layout.suggestionBindPreview(ctx.home, s.local_id);
+  const file = hookPreview + ".cli";
+  const pending = readJson<{ scope: string; at: number }>(file);
+  if (values.yes || pending || readJson(hookPreview) || readJson(layout.suggestionSeen(ctx.home, s.local_id, "move"))) {
+    const device = loadCredentials(ctx.home)?.device_id;
+    if (!device || !signedIn(ctx.home)) throw new UsageError("Sign in on this machine before changing the goal.");
+    const scope = JSON.stringify([device, share.workspace_id, share.session_key, share.binding_goal, goal?.id, goal?.version,
+      goal?.title, offered?.suggestion ?? null]);
+    const age = pending ? Date.now() - pending.at : -1;
+    out(`Binding preview for this session in ${share.workspace_name}. It will count toward ${goal ? `"${goal.title}"` : "no goal"} from the next prompt.`);
+    if (values.yes && (pending?.scope !== scope || !(age >= 0 && age < 600_000))) {
+      throw new UsageError("Review the current binding preview before running again with --yes.");
+    }
+    if (!(await confirm("Change the session's goal?", !!values.yes))) {
+      writeJsonAtomic(file, { scope, at: Date.now() });
+      return out("Goal unchanged. Run again with --yes to confirm.");
+    }
+    const latest = getShare(ctx, s.local_id);
+    const cached = loadFeed(ctx.home, share.workspace_id);
+    const current = shownGoalSuggestion(ctx.home, s.local_id, "move", cached, latest?.binding_goal ?? null);
+    const selected = goal ? cached?.goals.find((entry) => entry.id === goal.id && entry.bindable && entry.status === "active") : null;
+    if (!signedIn(ctx.home) || loadCredentials(ctx.home)?.device_id !== device || !latest
+      || latest.session_key !== share.session_key || latest.binding_goal !== share.binding_goal
+      || JSON.stringify(current?.suggestion) !== JSON.stringify(offered?.suggestion)
+      || (goal && (selected?.version !== goal.version || selected.title !== goal.title))) {
+      throw new UsageError("The binding changed. Run align bind again for a new preview.");
+    }
+    if (pending) removeFile(file);
+  }
+  bind(ctx, s.local_id, goal, suggested ?? "hand");
+  if (offered) saveSuggestionReply(ctx.home, s.local_id, "move", suggested ? "accepted" : "changed", goal?.id ?? null, nowIso());
   const kept = (ctx.db.prepare("SELECT goal_id, json FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(s.local_id) as { goal_id: string; json: string }[])
     .filter((h) => h.goal_id !== goal?.id)
     .map((h) => (JSON.parse(h.json) as { goal_title: string }).goal_title);
@@ -1793,6 +2116,12 @@ export async function main(argv: string[]): Promise<void> {
         return out(await measureCommand(ctx, rest));
       case "asks":
         return await cmdAsks(ctx, rest);
+      case "data-sharing":
+        return await cmdDataSharing(ctx, rest);
+      case "excerpt":
+        return await cmdExcerpt(ctx, rest);
+      case "analysis":
+        return await cmdAnalysis(ctx, rest);
       case "config":
         return await cmdConfig(ctx, rest);
       case "latch":

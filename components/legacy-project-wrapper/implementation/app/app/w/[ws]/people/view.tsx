@@ -131,6 +131,71 @@ function TeamMembers({ ws, team, members, owner, me, onDone }: { ws: string; tea
   );
 }
 
+const SHARE_TIERS = [
+  [1, "Work signals"],
+  [2, "Derived results (proposed)"],
+  [3, "Model-based goal suggestions (proposed)"],
+  [4, "Deliberate excerpts (proposed)"],
+] as const;
+
+function SharingRestrictions({ ws }: { ws: string }) {
+  const url = `/api/v2/workspaces/${ws}/data-sharing`;
+  const settings = useApi<{ blocked: number[]; model_check_blocked: boolean; decision_service: { url: string } | null }>(url);
+  const [address, setAddress] = useState<string | null>(null);
+  const addressChange = useAction();
+  const savedAddress = settings.data?.decision_service?.url ?? "";
+  const change = useAction();
+  const blockedTiers = settings.data?.blocked;
+  return (
+    <Panel title="Sharing restrictions">
+      <p className="mb-2 text-[14px] text-(--text-2)">Shared sessions send metadata by default. Work signals add repo-relative file paths, branch names, commit subjects and task or claim labels. A workspace block applies to everyone.</p>
+      <p className="mb-2 text-[14px] text-(--text-2)">A local Align server can receive finding, binding and limit IDs, goal versions, evidence labels, keyed digests and turn start times. Each excerpt sends only the text, named readers, purpose and expiry you confirm. Both choices are off by default.</p>
+      {settings.loading && <Loading />}
+      <Err>{settings.error}</Err>
+      <Err>{change.error}</Err>
+      {blockedTiers && SHARE_TIERS.map(([tier, label]) => (
+        <label key={tier} className="flex min-h-11 items-center gap-2 text-[14px]">
+          <input type="checkbox" name={`restrict-tier-${tier}`} checked={blockedTiers.includes(tier)} disabled={change.busy}
+            onChange={(e) => {
+              const blocked = e.target.checked;
+              void change.run(() => api(url, { method: "PATCH", body: { tier, blocked } }), settings.reload);
+            }} />
+          Block {label}
+        </label>
+      ))}
+      {settings.data && (
+        <label className="flex min-h-11 items-center gap-2 text-[14px]">
+          <input type="checkbox" name="restrict-model-check" checked={settings.data.model_check_blocked} disabled={change.busy}
+            onChange={(e) => {
+              const model_check_blocked = e.target.checked;
+              void change.run(() => api(url, { method: "PATCH", body: { model_check_blocked } }), settings.reload);
+            }} />
+          Block model limit checks (proposed)
+        </label>
+      )}
+      {settings.data && (
+        <form className="mt-3 min-w-0 space-y-2" onSubmit={(event) => {
+          event.preventDefault();
+          const decision_service_url = address?.trim() || null;
+          void addressChange.run(async () => {
+            await api(url, { method: "PATCH", body: { decision_service_url } });
+            setAddress(null);
+          }, settings.reload);
+        }}>
+          <Field label="Decision service address" hint="Both choices are off by default. Goal suggestions send the first prompt, branch, saved repository alias and eligible goal ids and titles. Limit checks send the final reply and the types and wording of applicable limits. Leave this blank to remove the address."
+            error={addressChange.error}>
+            <Input type="url" maxLength={2048} disabled={addressChange.busy} value={address ?? savedAddress} onChange={(event) => {
+              setAddress(event.target.value);
+              addressChange.setError(null);
+            }} />
+          </Field>
+          <Btn type="submit" disabled={addressChange.busy || address === null || address.trim() === savedAddress}>Save address</Btn>
+        </form>
+      )}
+    </Panel>
+  );
+}
+
 export default function People({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const owner = d.data?.role === "owner";
@@ -166,6 +231,7 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
       <Err>{d.error}</Err>
       {d.data && (
         <div className="flex flex-col gap-4">
+          {owner && <SharingRestrictions ws={ws} />}
           <Panel
             title="Members"
             actions={

@@ -8,7 +8,7 @@ import { authorize, canBind, canReadGoal, type GoalObject, type PolicyPrincipal,
 import { goalVersionDirective } from "./directives";
 import { event } from "./events";
 import { limitsIn, limitsOf, type Limit } from "./goal-limits";
-import { memberName, need } from "./workspaces";
+import { memberName, memberPrincipal, need } from "./workspaces";
 import { effectiveSet } from "./approval";
 import { personName } from "./retention";
 import { expireOpenRequests, releaseHold } from "./requests";
@@ -521,13 +521,18 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   if (level === "company" && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can create a company goal.");
   const title = str(b, "title", 300);
   const anchors = anchorsIn(b.anchors ?? {});
-  const dependsOn = dependsIn(pp, b.depends_on ?? [], null);
+  // Validate before waiting for a write, and recheck dependency visibility within the write.
+  dependsIn(pp, b.depends_on ?? [], null);
   const limits = limitsIn(b.limits ?? [], []);
   const targetShare = targetIn(b.target_share);
   const at = nowIso();
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals.");
   const id = await tx(() => {
+    const actor = memberPrincipal(pp.wsId, pp.userId);
+    need(actor, "goal.create", { kind: "goal_draft", podId });
+    if (level === "company" && actor.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can create a company goal.");
+    const dependsOn = dependsIn(actor, b.depends_on ?? [], null);
     const measures = measuresIn(b.measures ?? [], [], pp.wsId, { kind: "goal", ownerId: pp.userId, visibility, podId, level });
     const created = insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn, limits, targetShare }, at);
     // Here, not in insertGoal: the sample workspace's seeded limit is nobody's first.
@@ -634,7 +639,9 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
   need(pp, "goal.edit", goalObj(g));
   if (b.version !== undefined && b.version !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${g.version}.`);
   await tx(() => {
-    const next = nextContent(pp, g.id, contentOf(g), b, undefined, false, goalObj(g));
+    const actor = memberPrincipal(pp.wsId, pp.userId);
+    need(actor, "goal.edit", goalObj(g));
+    const next = nextContent(actor, g.id, contentOf(g), b, undefined, false, goalObj(g));
     writeGoalVersion(g, next, pp.userId, nowIso());
   });
   return serializeGoal(pp, goalRow(pp.wsId, goalId)!);

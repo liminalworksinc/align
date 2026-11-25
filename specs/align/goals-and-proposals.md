@@ -566,9 +566,9 @@ release for the workspace and month, shared across owners. Once a figure has bee
 either usage total or loss of the five-person minimum SHALL make the share unknown for the rest of that review
 period. This conservative rule prevents an update that could be attributed to one person. Deleting shared history
 SHALL still remove the underlying records. Release state SHALL hold no contributor identities or token totals and
-SHALL be removed when the workspace is purged. The review SHALL read no transcripts and require no
-additional opt-in. Questions about frequently confused goals depend on suggestion history, which is
-outside this phase.
+SHALL be removed when the workspace is purged. The review SHALL read neither transcripts nor derived findings
+and SHALL require no additional opt-in. Questions about frequently confused goals depend on suggestion
+history, which is outside this phase.
 
 `POST` to the same path SHALL use the shared same-origin check for cookie writes before validating the action.
 It SHALL accept `{action, period_end, goal_id?}`: `reviewed` marks that month's review done,
@@ -612,6 +612,11 @@ reading, binding or directive.
 
 - **WHEN** the latest CI reading has expired, a command reports an unknown value, or hand and automated readings report the same exact decimal for three weeks
 - **THEN** the review shows the corresponding question and source label without disclosing the reading details
+
+#### Scenario: A machine has shared a derived finding
+
+- **WHEN** a derived session finding is stored for a goal the owner can read
+- **THEN** the finding has no effect on the goal-list review and the review does not retrieve it
 
 #### Scenario: A cookie write comes from another site
 
@@ -1214,7 +1219,9 @@ the revision, including creation, counters and rebases. It SHALL compare only th
 stored base version. Each row SHALL record `kind`, `element_key` and `change` (`added`, `removed` or `changed`).
 Use a limit's ID for `limit`, a depended-on goal's ID for `dependency`, a measure's ID for `measure` and the field
 name for `field` (`title`, `status` or `anchors`). Anchors remain editable by goal owners only. Target share is outside
-change requests, and reallocations use a separate record. Reordering a list alone SHALL yield no element keys.
+change requests, and reallocations use a separate record. Reordering a list alone SHALL yield no element keys. A change to a limit's manual source title, path anchors or
+either approved example SHALL index that limit. Repo-relative anchors SHALL accept literal path segments
+including Unicode letters and parentheses.
 Server migration 29 SHALL create the element index after launch expectations, outcome history, and measure
 readings. The migration that creates the index SHALL backfill every stored revision against its own base
 version in the same transaction, regardless of the migration's schema version. It SHALL skip and count

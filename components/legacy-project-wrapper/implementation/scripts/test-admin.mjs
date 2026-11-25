@@ -94,7 +94,7 @@ function migrateFixture(dir, shift = 0) {
 }
 
 function testReadingUpgrade() {
-  const dir = path.join(testDir, "schema 29 to 31");
+  const dir = path.join(testDir, "schema 29 to 34");
   mkdirSync(path.join(dir, "v2"), { recursive: true });
   const d = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
   try {
@@ -114,7 +114,7 @@ function testReadingUpgrade() {
     d.exec("PRAGMA foreign_keys = ON;");
     const rows = d.prepare("SELECT id, value_num, source, source_ref, goal_version FROM v2_measure_readings ORDER BY rowid DESC").all();
     const version = d.prepare("PRAGMA user_version").get().user_version;
-    check("LIM-2524: a schema 29 database upgrades through 30 to 31", version === 31, version);
+    check("LIM-2524: a schema 29 database upgrades through 30 to 35", version === SCHEMA_VERSION, version);
     check("LIM-2524: migration 30 preserves legacy reading order and keeps unknown source details and version",
       rows.map((r) => r.id).join() === "mr_later,mr_one" && rows[0].value_num === 2 &&
       rows.every((r) => r.source === "self" && r.source_ref === null && r.goal_version === null) &&
@@ -124,6 +124,135 @@ function testReadingUpgrade() {
       d.prepare("SELECT COUNT(*) AS n FROM v2_measure_readings").get().n === 0);
   } finally {
     d.close();
+  }
+}
+
+function testDataBoundaryUpgrade() {
+  const dir = path.join(testDir, "schema 31 data boundary upgrade");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const db = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    db.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, 31)) db.exec(sql);
+    db.exec(`
+      INSERT INTO ba_user (id) VALUES ('u_review');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at, is_sample)
+        VALUES ('ws_review', 'Upgraded workspace', 'u_review', '${OLD}', 0);
+      INSERT INTO v2_devices (id, user_id, name, public_key, created_at)
+        VALUES ('d_old', 'u_review', 'Existing machine', 'test-key', '${OLD}');
+      INSERT INTO v2_goal_list_reviews (ws_id, user_id, period_end, reviewed_at)
+        VALUES ('ws_review', 'u_review', '2026-09-01', '${OLD}');
+      INSERT INTO v2_reading_credentials (id, ws_id, token_hash, label, created_at, created_by)
+        VALUES ('rc_old', 'ws_review', 'test-hash', 'Release job', '${OLD}', 'u_review');
+      PRAGMA user_version = 31;
+    `);
+    migrateFixture(dir);
+    db.exec("PRAGMA foreign_keys = ON;");
+    check("LIM-2526: a schema 31 upgrade keeps review and credential records with clean foreign keys",
+      db.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION &&
+      db.prepare("SELECT reviewed_at FROM v2_goal_list_reviews WHERE ws_id = 'ws_review'").get()?.reviewed_at === OLD &&
+      db.prepare("SELECT token_hash FROM v2_reading_credentials WHERE id = 'rc_old'").get()?.token_hash === "test-hash" &&
+      db.prepare("PRAGMA foreign_key_check").all().length === 0);
+    db.exec(`
+      INSERT INTO v2_devices (id, user_id, name, public_key, created_at)
+        VALUES ('d_new', 'u_review', 'New machine', 'new-test-key', '${NOW}');
+    `);
+    check("LIM-2526: migration 32 preserves legacy work-signal compatibility and grants no optional uploads",
+      db.prepare("SELECT legacy_work_signals FROM v2_devices ORDER BY id").all().map((row) => row.legacy_work_signals).join() === "0,1" &&
+      db.prepare("SELECT COUNT(*) AS n FROM v2_device_result_consent").get().n === 0 &&
+      db.prepare("SELECT COUNT(*) AS n FROM v2_data_restrictions").get().n === 0);
+    db.exec("INSERT INTO v2_data_restrictions (ws_id, tier) VALUES ('ws_review', 1), ('ws_review', 2)");
+    migrateFixture(dir);
+    check("LIM-2526: opening the upgraded database again keeps both sharing restrictions",
+      db.prepare("SELECT tier FROM v2_data_restrictions WHERE ws_id = 'ws_review' ORDER BY tier").all().map((row) => row.tier).join() === "1,2" &&
+      db.prepare("PRAGMA foreign_key_check").all().length === 0);
+  } finally {
+    db.close();
+  }
+}
+
+function testExcerptUpgrade() {
+  const dir = path.join(testDir, "excerpt-upgrade");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const legacy = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    const excerptMigration = migrations.findIndex((sql) => /\bCREATE TABLE v2_session_excerpts\b/.test(sql));
+    legacy.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, excerptMigration)) legacy.exec(sql);
+    legacy.exec(`
+      INSERT INTO ba_user VALUES ('u_old');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_old', 'Old workspace', 'u_old', '${OLD}');
+      INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES ('ws_old', 'u_old', 'owner', '${OLD}');
+      INSERT INTO v2_devices (id,user_id,name,public_key,created_at) VALUES ('dev_old','u_old','Laptop','key','${OLD}');
+      INSERT INTO v2_device_grants VALUES ('dev_old', 'ws_old');
+      INSERT INTO v2_device_result_consent VALUES ('dev_old', '${OLD}');
+      INSERT INTO v2_data_restrictions VALUES ('ws_old', 3), ('ws_old', 4);
+      INSERT INTO v2_workspace_decision_services VALUES ('ws_old', 'https://decision.example.test/', 'old-revision');
+      INSERT INTO v2_sessions (ws_id,session_key,user_id,device_id,harness,repo_key,started_at,state,created_at,updated_at,work_signals)
+        VALUES ('ws_old','session_old','u_old','dev_old','claude-code','repo_old','${OLD}','shared','${OLD}','${OLD}',1);
+      INSERT INTO v2_epochs (ws_id,session_key,epoch_id,starts_at,cause,authority,created_at)
+        VALUES ('ws_old','session_old','ep_old','${OLD}','manual','none','${OLD}');
+      INSERT INTO v2_analysis_findings
+        (ws_id,session_key,epoch_id,device_id,id,goal_version,limit_id,evidence,digest,turn_started_at,received_at)
+        VALUES ('ws_old','session_old','ep_old','dev_old','finding_old',1,'lim_old','file','digest_old','${OLD}','${NOW}');
+      PRAGMA user_version = ${excerptMigration};
+      PRAGMA foreign_keys = ON;
+    `);
+    const preserve = ["v2_analysis_findings", "v2_data_restrictions", "v2_device_result_consent", "v2_sessions", "v2_epochs", "v2_workspace_decision_services"];
+    const records = () => JSON.stringify(preserve.map((name) => legacy.prepare(`SELECT * FROM ${name}`).all()));
+    const before = records();
+    const upgrade = migrateFixture(dir);
+    check("LIM-2528: populated schema 33 upgrades through 34 to 35 without losing existing findings and choices",
+      excerptMigration === 33 && upgrade.status === 0 && records() === before
+        && legacy.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION
+        && legacy.prepare("PRAGMA foreign_key_check").all().length === 0
+        && legacy.prepare("PRAGMA integrity_check").get().integrity_check === "ok", upgrade.stderr);
+    legacy.exec("UPDATE v2_analysis_findings SET evidence = 'model' WHERE id = 'finding_old'");
+    const findingIndexes = legacy.prepare("PRAGMA index_list(v2_analysis_findings)").all();
+    check("LIM-2528: migration 34 allows model evidence and keeps both finding retention indexes",
+      legacy.prepare("SELECT evidence FROM v2_analysis_findings WHERE id = 'finding_old'").get()?.evidence === "model" &&
+      ["v2_analysis_expiry", "v2_analysis_receipt_expiry"].every((name) => findingIndexes.some((index) => index.name === name)));
+    check("LIM-2528: upgraded excerpt tables and permission state start empty",
+      ["v2_device_excerpt_consent", "v2_session_excerpts", "v2_excerpt_readers", "v2_excerpt_share_ids", "v2_model_send_windows", "v2_model_check_blocks", "v2_excerpt_storage_cleanup"]
+        .every((name) => legacy.prepare("SELECT 1 FROM sqlite_schema WHERE name = ?").get(name)
+          && !legacy.prepare(`SELECT 1 FROM ${name}`).get()));
+  } finally {
+    legacy.close();
+  }
+}
+
+function testDecisionDispatchUpgrade() {
+  const dir = path.join(testDir, "decision-dispatch");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const legacy = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    const dispatchMigration = migrations.findIndex((sql) => /capability IN \('suggestion', 'limit_check', 'excerpt'\)/.test(sql));
+    legacy.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, dispatchMigration)) legacy.exec(sql);
+    legacy.exec(`
+      INSERT INTO ba_user VALUES ('u_old');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_old', 'Old workspace', 'u_old', '${OLD}');
+      INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES ('ws_old', 'u_old', 'owner', '${OLD}');
+      INSERT INTO v2_devices (id,user_id,name,public_key,created_at) VALUES ('dev_old','u_old','Laptop','key','${OLD}');
+      INSERT INTO v2_device_excerpt_consent VALUES ('dev_old', 1, 4);
+      INSERT INTO v2_data_restrictions VALUES ('ws_old', 3);
+      INSERT INTO v2_model_check_blocks VALUES ('ws_old');
+      INSERT INTO v2_workspace_decision_services VALUES ('ws_old', 'https://decision.example.test/', 'old-revision');
+      INSERT INTO v2_model_send_windows VALUES ('ws_old', 'suggestion', ${Date.now() + 60_000});
+      PRAGMA user_version = ${dispatchMigration};
+      PRAGMA foreign_keys = ON;
+    `);
+    const preserve = ["v2_device_excerpt_consent", "v2_data_restrictions", "v2_model_check_blocks", "v2_workspace_decision_services"];
+    const choices = () => JSON.stringify(preserve.map((table) => legacy.prepare(`SELECT * FROM ${table}`).all()));
+    const before = choices();
+    migrateFixture(dir);
+    check("LIM-2527: schema 35 expires earlier dispatch windows and preserves sharing choices",
+      dispatchMigration === 34 && choices() === before && !legacy.prepare("SELECT 1 FROM v2_model_send_windows").get()
+      && legacy.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION
+      && legacy.prepare("PRAGMA foreign_key_check").all().length === 0
+      && legacy.prepare("PRAGMA integrity_check").get().integrity_check === "ok");
+  } finally {
+    legacy.close();
   }
 }
 
@@ -178,8 +307,77 @@ function testChangeElementUpgrade(name, shift) {
   }
 }
 
+function testSuggestionOriginUpgrade() {
+  const dir = path.join(testDir, "schema 32 to 33");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const d = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, 32)) d.exec(sql);
+    d.exec(`
+      INSERT INTO ba_user VALUES ('owner');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws', 'Test workspace', 'owner', '${OLD}');
+      INSERT INTO v2_devices (id, user_id, name, public_key, created_at) VALUES ('dv', 'owner', 'Test device', '{}', '${OLD}');
+      INSERT INTO v2_sessions (ws_id, session_key, user_id, device_id, harness, repo_key, started_at, state, created_at, updated_at)
+        VALUES ('ws', 'ss', 'owner', 'dv', 'codex', 'repo', '${OLD}', 'shared', '${OLD}', '${OLD}');
+      INSERT INTO v2_epochs (ws_id, session_key, epoch_id, starts_at, cause, authority, created_at, origin)
+        VALUES ('ws', 'ss', 'ep', '${OLD}', 'manual', 'none', '${OLD}', 'hand');
+      INSERT INTO v2_epochs (ws_id, session_key, epoch_id, starts_at, ends_at, cause, authority, created_at, origin)
+        VALUES ('ws', 'ss', 'ep_missing_goal', '${OLD}', '${OLD}', 'manual', 'none', '${OLD}', 'suggested_agent');
+      UPDATE v2_epochs SET spend_team_id = 'pod_captured';
+      INSERT INTO v2_usage (ws_id, session_key, request_key, epoch_id, ts, model, query_source,
+        input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, basis, source, received_at)
+        VALUES ('ws', 'ss', 'req', 'ep', '${OLD}', 'test-model', 'conversation', 10, 2, 0, 0, 0, 0, 'unknown', 'test', '${OLD}');
+      INSERT INTO v2_analysis_findings (ws_id, session_key, epoch_id, device_id, id, goal_version, limit_id, evidence, digest, turn_started_at, received_at)
+        VALUES ('ws', 'ss', 'ep', 'dv', 'test-finding', 1, 'test-limit', 'wording', 'test-digest', '${OLD}', '${NOW}');
+      INSERT INTO v2_data_restrictions (ws_id, tier) VALUES ('ws', 1), ('ws', 2);
+      INSERT INTO v2_device_result_consent (device_id, enabled_at) VALUES ('dv', '${NOW}');
+      INSERT INTO v2_goal_list_reviews (ws_id, user_id, period_end, reviewed_at) VALUES ('ws', 'owner', '${OLD}', '${NOW}');
+      INSERT INTO v2_events (name, ws_id, at) VALUES ('workspace_created', 'ws', '${OLD}');
+      PRAGMA user_version = 32;
+    `);
+    const preserved = () => JSON.stringify([
+      ...["v2_epochs", "v2_usage", "v2_analysis_findings"].map(
+        (table) => d.prepare(`SELECT * FROM ${table} WHERE epoch_id = 'ep'`).all(),
+      ),
+      d.prepare("SELECT * FROM v2_goal_list_reviews").all(),
+      d.prepare("SELECT * FROM v2_events").all(),
+      d.prepare("SELECT * FROM v2_data_restrictions ORDER BY tier").all(),
+      d.prepare("SELECT * FROM v2_device_result_consent").all(),
+    ]);
+    const before = preserved();
+    migrateFixture(dir);
+    d.exec("PRAGMA foreign_keys = ON");
+    const after = preserved();
+    const update = d.prepare("UPDATE v2_epochs SET origin=? WHERE epoch_id='ep'");
+    update.run("suggested_rule");
+    let refused = false;
+    try {
+      update.run("unknown_suggestion");
+    } catch {
+      refused = true;
+    }
+    check("LIM-2527: migration 33 preserves spending period origins, captured teams, dependent rows, reviews, events and sharing choices",
+      d.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION && before === after && refused && d.prepare("PRAGMA foreign_key_check").all().length === 0 &&
+      d.prepare("SELECT origin FROM v2_epochs WHERE epoch_id='ep'").get().origin === "suggested_rule");
+    check("LIM-2527: upgrade clears suggestion origins on unallocated epochs and starts with no configured service",
+      d.prepare("SELECT origin FROM v2_epochs WHERE epoch_id='ep_missing_goal'").get().origin === null &&
+      !d.prepare("SELECT 1 FROM v2_workspace_decision_services").get());
+    d.exec("DELETE FROM v2_epochs WHERE epoch_id='ep'");
+    check("LIM-2527: rebuilt epochs retain cascading deletion of usage and findings",
+      !d.prepare("SELECT 1 FROM v2_usage").get() && !d.prepare("SELECT 1 FROM v2_analysis_findings").get());
+    d.exec("INSERT INTO v2_workspace_decision_services VALUES ('ws', 'https://decision.example.test/', 'test-revision')");
+    d.exec("DELETE FROM v2_workspaces WHERE id='ws'");
+    check("LIM-2527: purging the workspace cascades to the decision service setting",
+      !d.prepare("SELECT 1 FROM v2_workspace_decision_services").get());
+  } finally {
+    d.close();
+  }
+}
+
 try {
   testReadingUpgrade();
+  testDataBoundaryUpgrade();
   testChangeElementUpgrade("schema 28 to 29", 0);
   testChangeElementUpgrade("shifted migration", 1);
   const reviewDir = path.join(testDir, "schema 30 to 31");
@@ -222,13 +420,16 @@ try {
     const ci = legacyDb.get("SELECT value_text, source, source_ref, stale_after FROM v2_measure_readings WHERE id = 'mr_ci'");
     const command = legacyDb.get("SELECT value_text, source, source_ref FROM v2_measure_readings WHERE id = 'mr_command'");
     check("LIM-2525 (schema 30 to 31): upgrade keeps automated readings with clean foreign keys",
-      legacyDb.get("PRAGMA user_version").user_version === 31 &&
+      legacyDb.get("PRAGMA user_version").user_version === SCHEMA_VERSION &&
       ci?.value_text === "9007199254740993" && ci.source === "ci" && JSON.parse(ci.source_ref).run === "7" && ci.stale_after === NOW &&
       command?.value_text === null && command.source === "command" && JSON.parse(command.source_ref).exit_status === 7 &&
       legacyDb.all("PRAGMA foreign_key_check").length === 0);
   } finally {
     reviewUpgrade.close();
   }
+  testSuggestionOriginUpgrade();
+  testExcerptUpgrade();
+  testDecisionDispatchUpgrade();
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],
     ["purge dry-run", ["workspaces", "delete", WS, "--purge", "--yes", "--dry-run"]],

@@ -1501,14 +1501,16 @@ time to catch up.
 ### Requirement: Binding spending period origin
 
 The server SHALL store and return `origin` with the spending period, alongside the existing cause and authority. It accepts
-`hand`, `folder_rule`, `anchor_hint`, `alignment`, `switch_request`, `past_import`, `suggested_agent`, `suggested_model`
-or null. Omitted origin and spending periods stored before origin was recorded have null origin. The two suggestion values are
-reserved for future clients. The current CLI sends neither.
+`hand`, `folder_rule`, `anchor_hint`, `alignment`, `switch_request`, `past_import`, `suggested_agent`, `suggested_model`,
+`suggested_rule` or null. Omitted origin and spending periods stored before origin was recorded have null origin. Suggestion
+origins record a developer’s confirmation. The server receives no candidate list, suggestion input or feedback.
+Migration 33 SHALL preserve existing spending periods, their bindings and dependent records while adding the local
+suggestion origin and workspace decision service setting.
 
 #### Scenario: Recording an origin
 
-- **WHEN** a device opens a spending period with a non-null origin
-- **THEN** the server records `alignment` for a `directive:<id>` cause naming the `binding_changed` for that session and goal, issued by an approved `work_toward`. It records `switch_request` for a cause naming a `switch_goal` request to that session and goal which its developer accepted. It records the other known origins with a `manual` cause. If a known origin cannot be confirmed, a valid spending period still returns 200 with origin null and can receive usage. An unknown origin returns 400. Every cause must be `manual` or name a directive sent to this session, including on retries.
+- **WHEN** a device opens an spending period with a non-null origin
+- **THEN** the server records `alignment` for a `directive:<id>` cause naming the `binding_changed` for that session and goal, issued by an approved `work_toward`. It records `switch_request` for a cause naming a `switch_goal` request to that session and goal which its developer accepted. It records the other known origins with a `manual` cause. An spending period without a goal records null for each of the three suggestion origins. If a known origin cannot be confirmed, a valid spending period still returns 200 with origin null and can receive usage. An unknown origin returns 400. Every cause must be `manual` or name a directive sent to this session, including on retries.
 
 #### Scenario: A device clock that ran ahead
 
@@ -1960,6 +1962,160 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - The retention periods are fixed in code (`lib/v2/retention-core.mts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
 - Should deleting shared history stay open to any of the sharer's live devices, or only the device that shared it? (Implemented: any live device of the sharing account; a re-pair otherwise strands the history.)
 - A goal's approver approving a "work toward" alignment now lets the aligned person's agent read that goal's team's accepted asks (read-only, on the device feed only, while the alignment is approved and the session is live on the goal; "Asks feed"). The owners should confirm that approving an alignment may grant this, or say whether the approver should see it on the alignment card first. (Implemented: it does, with no extra wording on the card; the browser and `GET .../asks/{id}` are unchanged.)
+
+### Requirement: Workspace sharing restrictions and private findings
+
+A workspace owner SHALL be able to forbid work signals and proposed tiers 2 through 4 independently. A ban SHALL
+apply to new writes for that tier. Owners SHALL be able to block tier 3 goal suggestions and model limit
+checks independently. Removing a ban grants no machine consent. Hosted workspaces forbid central logs
+independently of any setting. A device SHALL be able to read the restrictions for a workspace it reaches
+and set only its own derived-result and deliberate excerpt consent.
+A session's work-signal consent SHALL be recorded only on a request authenticated as its sharing device. Named
+activity without that session consent or under a workspace ban SHALL be refused while metadata-only activity
+continues. Devices already paired at the upgrade to schema 32 MAY keep using the prior activity request to express
+an existing local choice to send named fields, until an explicit server-side choice is recorded for the session.
+New clients SHALL identify named requests with the new activity protocol and use the consent endpoint. A workspace ban SHALL override
+both protocols. If a legacy request cannot send names, its refusal SHALL tell the person to update the CLI.
+
+A restriction write SHALL check current membership and workspace ownership in the same transaction as the write.
+In Mode L the sharing device SHALL be able to write, read and delete proposed derived findings in its own shared
+history. Hosted Align SHALL refuse consent and uploads. Upload preflight SHALL reflect that deployment restriction,
+the current device grant and the same workspace sharing permission, session state, consent and ban as the write.
+The person who shared the session SHALL be able to delete the result with session history. A finding belongs to the
+session and a recorded binding spending period. Accept only the closed fields in the data-tier requirement, with a known
+limit on that goal version and a reported turn start later than the server's current consent time. Repeating an
+enabled choice preserves its start time. Turning consent off and on starts a new consent period. An available finding
+with the same id and record SHALL acknowledge an identical retry. The server SHALL keep findings private to the
+sharing device. It SHALL refuse uploads of turns 30 days old or older, and remove results by that cutoff. It SHALL
+also reject retries of findings deleted by the sharing device, including uploads for turns at or before that deletion.
+Deleting session history removes the findings. A deletion request from an authorized device that reaches the sharer's
+history deletion marker SHALL acknowledge that removal. Audit changes to consent, bans, and deletion without recording private data, and keep findings out of
+product analytics. A caller with no right to see the session or workspace SHALL get 404.
+
+Named activity and derived finding uploads SHALL also use a short workspace dispatch window. If named activity
+loses that window, the agent SHALL withhold names and keep eligible metadata. The server SHALL acknowledge
+a readable identical finding during a workspace upload ban when the device still has its own active consent
+and its sharing role. A repeated save SHALL observe the same outstanding dispatch wait as the first save. A workspace restriction,
+recipient change, loss of sharing access or session stop SHALL end affected dispatch permission and invalidate
+any outstanding answer. Waiting for dispatch windows SHALL measure elapsed time independently of wall-clock
+steps. A device SHALL abandon a window when its clock changes enough to make expiry uncertain.
+
+Derived-result permission for a finding SHALL include access to its recorded goal and binding. History already
+removed by the person SHALL be acknowledged to an authorized pairing of that person. Each change to the
+deletion cutoff SHALL be audited even when no stored finding matched. An unchanged retry SHALL preserve the
+cutoff and SHALL NOT write another audit. Expired findings and excerpts SHALL be removed as soon as their
+cutoff is processed, including on access after waiting for another writer. Excerpt expiry SHALL remove its grants
+and write an audit entry.
+
+#### Scenario: Permission changes while a request is waiting
+
+- **WHEN** an owner repeats a save while an earlier dispatch window is open, stops a session from sharing or removes a device's sharing role
+- **THEN** the saved change ends dispatch permission and outstanding answers are discarded
+
+#### Scenario: An owner forbids model suggestions
+
+- **WHEN** a workspace owner blocks model-based goal suggestions and a device reads the restriction
+- **THEN** the device receives tier 3 as blocked. A member cannot change that restriction and a device outside the workspace receives 404.
+
+#### Scenario: An owner forbids derived findings
+
+- **WHEN** a device with consent sends an allowed finding, the owner bars that tier and the device attempts another upload
+- **THEN** the first can be inspected and deleted by the sharing device, the second is refused, and a different device or a workspace owner gets 404 for the first
+
+#### Scenario: Consent, role changes and removed findings
+
+- **WHEN** a device enables derived results after a turn starts or a member becomes a viewer before syncing
+- **THEN** the server refuses the earlier turn, and the viewer's upload preflight says sharing is off
+
+#### Scenario: Retry after deletion or expiry
+
+- **WHEN** a device retries a finding after deletion or expiry
+- **THEN** Align refuses the retry and the finding stays unavailable
+
+#### Scenario: Ownership changes during a restriction request
+
+- **WHEN** a restriction request's author loses workspace ownership before its write
+- **THEN** Align checks the new role and leaves the restriction unchanged
+
+### Requirement: Workspace decision service (proposed)
+
+An owner SHALL be able to set, replace or clear the workspace decision service address in People.
+Use HTTPS, with HTTP on loopback allowed in Mode L. Reject credentials, query strings and fragments in the address.
+Align SHALL store only the address and a revision for this setting. Clearing the setting or purging the workspace
+SHALL remove the record. A change SHALL be audited without the address.
+The workspace policy read SHALL return the current address and revision to a caller entitled to read the workspace
+only if the address passes the same rules as a new save in the current mode.
+For dispatch, require a current device grant with permission to share sessions in the workspace. The final
+suggestion authorization SHALL include the current active bindable goal ids and titles. When granting a short
+dispatch window, Align SHALL keep the checked authorization current until the window expires. Goal suggestions
+and limit checks SHALL have independent workspace blocks. A saved block SHALL prevent further sends and invalidate
+outstanding answers, even if later cleared. Answer checks SHALL recheck the pairing, block, recipient and relevant
+workspace access without granting another dispatch window. An address write SHALL recheck workspace ownership in the
+same transaction as the write. A change SHALL invalidate both kinds of outstanding answers. Schema migration 35
+SHALL preserve the saved address, blocks and explicit consent choices and expire older dispatch windows.
+A member or viewer gets 403 on writes. A caller outside the workspace gets 404.
+
+#### Scenario: A configured recipient changes
+
+- **WHEN** the owner replaces or clears the address
+- **THEN** a device's next policy read cannot authorize dispatch under consent to the old address revision. The person can explicitly choose a newly configured address on their machine.
+
+#### Scenario: A retained address is invalid in hosted mode
+
+- **WHEN** hosted Align opens data that contains a loopback HTTP decision service saved in local mode
+- **THEN** policy and dispatch treat the address as unavailable and neither returns it
+
+#### Scenario: A team membership changes as the goal list is loaded
+
+- **WHEN** a team membership is removed before the final dispatch grant or while that grant is outstanding
+- **THEN** subsequent grants omit any goals the person lost, and a completed removal leaves no usable prior grant for those goals
+
+### Requirement: Deliberate excerpts with named readers
+
+Under the proposed rule in [ADR 0008](../../docs/decisions/0008-limit-checks-and-excerpts.md), only a current,
+opted-in sharing device whose person owns a live shared session SHALL be able to upload an excerpt from it.
+The workspace tier 4 prohibition applies to dispatch grants and at upload time. Align SHALL wait for outstanding
+excerpt dispatch grants to expire before saving a tier 4 block. An excerpt SHALL have exact plain text of 1 to 4,000
+UTF-8 bytes, a stated purpose of at most 160 characters, one to five distinct current workspace readers other
+than the sharer, and an explicit lifetime of 1 to 168 whole hours from acceptance. The server SHALL accept only
+those fields and a client-generated share id used for idempotent retries. An accepted id SHALL never create a new
+share, even after the excerpt and its audit have been deleted. The replay record SHALL carry only the opaque
+share id and its workspace id, and last until the workspace is permanently purged. Invalid readers and an unreadable
+session or workspace SHALL get 404. No destination based on role, team or link alone is allowed.
+
+Browser reads SHALL require current membership and return excerpts only to their sharer and their named readers.
+A workspace owner gains no access by role. Only the sharer may revoke, even after stopping session sharing or
+turning off the feature. Expired and revoked excerpts SHALL be unavailable on subsequent reads. Revocation
+SHALL delete the text and audience immediately. Expiration SHALL delete the text and audience at the next
+retention pass or excerpt access, whichever comes first. Deleting a session or removing its sharer SHALL delete
+its excerpts. Removing a reader SHALL remove that grant, including across a later rejoin. Retention SHALL include
+excerpts and keep content-free audit rows for sharing, revocation and expiry according to audit retention.
+Deleting excerpt text SHALL overwrite freed SQLite content and trigger a truncating checkpoint on the live
+database log, with retries when readers or writers prevent truncation. The published schedule SHALL distinguish
+immediate loss of access from storage cleanup and disclose the limits of the checkpoint and snapshot retention.
+Schema migration 34 SHALL preserve existing sharing choices and findings and start with excerpt consent off and no
+excerpts.
+
+#### Scenario: Access is limited to the named people
+
+- **WHEN** a sharer names a member and a viewer, and an unnamed workspace owner opens Sessions
+- **THEN** the sharer, member and viewer can each read the excerpt, and the owner has no entry and gets 404 by id
+
+#### Scenario: Excerpt deletion
+
+- **WHEN** the sharer revokes one excerpt and the server's clock reaches the expiry of another
+- **THEN** both become unreadable and the live database deletes the text and reader grants through revocation
+  or expiry cleanup, leaving content-free audit rows
+
+#### Scenario: Replay after audit retention
+
+- **WHEN** a revoked or expired excerpt's audit has been pruned and its original upload is repeated
+- **THEN** the server refuses the old share id and no former reader regains access
+
+#### Scenario: Access after leaving and rejoining
+
+- **WHEN** a named reader or the sharer leaves and rejoins the workspace
+- **THEN** the old reader grant or the sharer's deleted excerpt does not return
 
 ## Sources
 

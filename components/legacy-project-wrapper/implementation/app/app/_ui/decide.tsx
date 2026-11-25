@@ -488,7 +488,7 @@ export function OpenRequest({
             {fields.map((k) => (
               <div key={k} className="mt-1 text-[14px]">
                 <span className="block text-[12px] text-zinc-500">{FIELD_LABEL[k]}</span>
-                <FieldValue k={k} v={cr.diff.before[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.before} />
+                <FieldValue k={k} v={cr.diff.before[k]} other={cr.diff.after[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.before} />
               </div>
             ))}
           </div>
@@ -497,7 +497,7 @@ export function OpenRequest({
             {fields.map((k) => (
               <div key={k} className="mt-1 text-[14px]">
                 <span className="block text-[12px] text-zinc-500">{FIELD_LABEL[k]}</span>
-                <FieldValue k={k} v={cr.diff.after[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.after} />
+                <FieldValue k={k} v={cr.diff.after[k]} other={cr.diff.before[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.after} />
               </div>
             ))}
             <p className="mt-2 text-[13px] text-zinc-500">Not approved. Nothing changes until someone in the goal&apos;s approval set approves it, and agents get it only at launch.</p>

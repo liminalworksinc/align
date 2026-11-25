@@ -199,6 +199,7 @@ describe("C11-3: a share ended by a lost workspace, back through a new `align lo
     const resumed = (json(runHook(t, "claude", "SessionStart", { session_id: Z2.sid, source: "resume", cwd: Z2.cwd }).stdout)?.systemMessage ?? "") as string;
     assert.match(resumed, /^Align: this machine can reach Acme in Align again\. To share this session there again, type `::align share` here/, resumed);
     assert.doesNotMatch(resumed, /no longer have access/);
+    prompt(t, Z1, "::align share");
     assert.match(prompt(t, Z1, "::align share confirm").reason, /^Align: sharing requested toward "Ship the v2 onboarding flow"/);
     await sync(t);
     assert.equal(fake.sessions.get(Z1.key)?.state, "shared");

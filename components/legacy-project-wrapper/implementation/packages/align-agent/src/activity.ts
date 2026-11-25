@@ -8,26 +8,33 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
 import { api, clockOffset, postTimed } from "./api.ts";
+import { decisionWindow, decisionWindowStart } from "./decision-model.ts";
 import { kvGet, kvSet } from "./db.ts";
-import { getSession } from "./ledger.ts";
+import { epochFor, getSession } from "./ledger.ts";
 import { activityBase, confirming, liveGoalId, madeActs, pathHash, rawActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
 import { privateActivity, sharedNow } from "./hooks/private.ts";
 import { activityLids, PENDING_MS, settle, verdictFor, verdictsOf } from "./hooks/evidence.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
+import { getShare } from "./hot.ts";
+import { matchRule, readRules } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
 import type { HotState, InjectedState } from "./shared/types.ts";
-import { matchRule, readRules } from "./shared/rules.ts";
 
 const KEEP_MS = 6 * 3_600_000;
 const DEFAULT_BRANCHES = new Set(["main", "master", "trunk", "develop", "dev"]);
 const BATCH = 200;
 
-/** Consent to share paths and text: the session's own setting, else the folder rule it was shared under. */
-export function signalsAllowed(ctx: Ctx, lid: string, cwd: string | null): boolean {
-  const own = kvGet(ctx.db, `signals:${lid}`);
-  if (own !== null) return own === "1";
-  return !!matchRule(readRules(ctx.home), cwd)?.signals;
+/** An existing share's choice belongs to that session. */
+export function signalsAllowed(ctx: Ctx, lid: string): boolean {
+  const saved = kvGet(ctx.db, `signals:${lid}`);
+  if (saved !== null) return saved === "1";
+  const share = getShare(ctx, lid);
+  if (!share || !ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=? AND origin='folder_rule' LIMIT 1").get(lid)) return false;
+  const rule = matchRule(readRules(ctx.home), getSession(ctx.db, lid)?.cwd ?? null);
+  const on = !!rule?.signals && rule.workspace_id === share.workspace_id && rule.created_at <= share.created_at;
+  kvSet(ctx.db, `signals:${lid}`, on ? "1" : "0");
+  return on;
 }
 
 interface Item {
@@ -35,6 +42,7 @@ interface Item {
   kind: "edit" | "commit" | "task" | "claim";
   at: string;
   repo_id: string;
+  epoch_id?: string | null;
   path_hash?: string | null;
   path?: string | null;
   text?: string | null;
@@ -361,7 +369,7 @@ export function waitingActivity(ctx: Ctx): number {
     const cwd = getSession(ctx.db, s.local_id)?.cwd ?? null;
     const repo = repoIdentity(s.workspace_id, cwd);
     if (!repo) continue;
-    const named = signalsAllowed(ctx, s.local_id, cwd);
+    const named = signalsAllowed(ctx, s.local_id);
     const v = verdictsOf([...rawActs(ctx.home, s.local_id), ...all]);
     const made = madeActs(all, confirming(ctx.home, s.local_id), v);
     // Edits and commits held for their call's verdict (or their file's change) wait as well, until they are decided.
@@ -397,13 +405,34 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
       kvSet(ctx.db, waitKey, "[]");
       continue;
     }
-    const named = signalsAllowed(ctx, s.local_id, cwd);
+    const shared = () => {
+      const current = getShare(ctx, s.local_id);
+      return current?.state === "shared" && current.workspace_id === s.workspace_id && current.session_key === s.session_key;
+    };
+    const canName = () => shared() && signalsAllowed(ctx, s.local_id);
+    const named = canName();
+    const branchChanged = repo.branch && !DEFAULT_BRANCHES.has(repo.branch) && kvGet(ctx.db, `act_branch:${s.local_id}`) !== repo.branch;
+    const grantNames = async (epochs: string[]) => {
+      if (!epochs.length || !canName()) return () => false;
+      try {
+        const remaining = decisionWindowStart();
+        const query = new URLSearchParams({ phase: "dispatch" });
+        for (const epoch of epochs) query.append("epoch", epoch);
+        const permission = await api(ctx, "PUT", `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/sessions/${encodeURIComponent(s.session_key)}/work-signals?${query}`, {
+          bodyAtSend: () => ({ enabled: canName() }), timeoutMs: 1500, redirect: "error",
+        });
+        const duration = decisionWindow(permission);
+        const readable = new Set(Array.isArray(permission.json?.epochs) ? permission.json.epochs : []);
+        return (epoch: string) => readable.has(epoch) && duration > 0 && remaining(duration) > 0 && canName();
+      } catch {
+        return () => false;
+      }
+    };
     const items: Item[] = [];
     const base = { session_key: s.session_key, repo_id: repo.repo_id };
     // The branch name is a useful default label, except for the default branch, which says nothing about the work.
-    if (named && repo.branch && !DEFAULT_BRANCHES.has(repo.branch) && kvGet(ctx.db, `act_branch:${s.local_id}`) !== repo.branch) {
+    if (named && repo.branch && branchChanged) {
       items.push({ ...base, kind: "task", at: new Date().toISOString(), text: `branch ${repo.branch}` });
-      kvSet(ctx.db, `act_branch:${s.local_id}`, repo.branch);
     }
     for (const a of acts) {
       if ((a.t === "edit" || a.t === "claim") && a.p) {
@@ -414,12 +443,38 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
       else if (a.t === "task" && named && a.s) items.push({ ...base, kind: "task", at: a.at, text: a.s });
     }
     let ok = true;
+    const metadata = (item: Item): Item | null => {
+      if (item.kind === "task") return null;
+      return { ...item, path: null, text: null };
+    };
+    const url = `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/activity`;
     for (let i = 0; i < items.length && ok; i += BATCH) {
-      // Times go up on the server's clock; refusals are logged, never dropped silently (C3-4).
-      const batch = items.slice(i, i + BATCH);
-      const { r, refused } = await postTimed(ctx, `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/activity`, "items", batch, "activity");
+      const batch = items.slice(i, i + BATCH).map((item) => {
+        const epoch = epochFor(ctx.db, s.local_id, null, item.at);
+        return { ...item, epoch_id: epoch?.workspace_id === s.workspace_id && epoch.synced === 1 ? epoch.epoch_id : null };
+      });
+      const protocol = { work_signals_version: 2 };
+      const { r, refused } = await postTimed<Item>(ctx, url, "items", batch, "activity", protocol, async () => {
+        const epochs = [...new Set(batch.flatMap((item) => item.epoch_id && (item.path != null || item.text != null) ? [item.epoch_id] : []))];
+        const namesCurrent = await grantNames(epochs);
+        return (item) => shared() ? (item.epoch_id && namesCurrent(item.epoch_id) ? item : metadata(item)) : null;
+      });
       ok = !!r && r.status >= 200 && r.status < 300;
-      if (ok) sent += batch.length - refused.length;
+      if (!ok) continue;
+      sent += batch.length - refused.length;
+      const hashOnly = refused.filter(({ reason }) => reason === "work_signals_off").flatMap(({ index }) => {
+        const item = metadata(batch[index]);
+        return item ? [item] : [];
+      });
+      if (hashOnly.length) {
+        const retry = await postTimed(ctx, url, "items", hashOnly, "activity", protocol, async () => (item) => shared() ? item : null);
+        ok = !!retry.r && retry.r.status >= 200 && retry.r.status < 300;
+        if (ok) sent += hashOnly.length - retry.refused.length;
+      }
+      if (ok && repo.branch && branchChanged && batch.some((item, index) =>
+        item.kind === "task" && item.text === `branch ${repo.branch}` && !refused.some((x) => x.index === index))) {
+        kvSet(ctx.db, `act_branch:${s.local_id}`, repo.branch);
+      }
     }
     if (ok) {
       // On failure the same lines (and the same waiting edits) go up on the next pass.

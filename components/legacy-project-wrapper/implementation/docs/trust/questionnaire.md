@@ -23,7 +23,7 @@ the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION
 | # | Question | Answer | Detail |
 | --- | --- | --- | --- |
 | 7 | Do you have an inventory of the customer data you hold? | Yes | Privacy policy, "What we collect"; security overview, "What Align stores". |
-| 8 | Do you store customer source code, prompts or AI conversations? | No | The server stores no prompt text, tool output, messages, code or file contents. <!-- docs/RETENTION.md; lib/v2/db.ts --> |
+| 8 | Do you store customer source code, prompts or AI conversations? | Only selected excerpts | By default, transcript text stays on the machine. The server stores a passage when the sharer confirms it for named readers. <!-- docs/RETENTION.md; lib/v2/db.ts --> |
 | 9 | Do you process special categories of personal data? | No | Not by design. Align holds account details, workspace structure and usage metadata. |
 | 10 | Is customer data used to train AI models? | No | Align's server calls no AI model provider and trains no model. Subprocessors, "Not subprocessors". |
 | 11 | Is there a published retention schedule? | Yes | [RETENTION.md](../RETENTION.md), applied by a daily job. |
@@ -84,4 +84,4 @@ the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION
 | 41 | Do you publish your subprocessors and give notice of changes? | Yes | [Subprocessors](subprocessors.md); 30 days' notice with a right to object. |
 | 42 | Do you offer a DPA with Standard Contractual Clauses? | Yes | The Common Paper DPA with the 2021 EU SCCs and the UK Addendum. [DPA note](dpa.md). |
 | 43 | Do you use third-party analytics or advertising trackers? | No | Product events are content-free and kept in Align's own database for 13 months, for the operator only. |
-| 44 | Can the product run without sending data to you? | Yes | Local mode keeps everything on the person's own machine. |
+| 44 | Can the product run without sending data to you? | Yes | Local mode runs the Align server on the person's machine. A separately enabled decision check can send the final reply to the configured service. |

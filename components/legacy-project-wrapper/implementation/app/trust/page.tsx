@@ -20,8 +20,8 @@ export default function Page() {
     <TrustFrame>
       <h1 className={`${PAGE_H1} mb-3`}>Trust</h1>
       <p className="mb-4">
-        What Align holds, where, for how long, and how it is protected. Align stores no prompts, agent output or code on its servers, and Align in local mode keeps everything on your own machine.
-        These documents describe the code as it is today, including what isn&apos;t done yet, and are drafts under review.
+        Shared sessions send metadata by default, including in local mode. By default, your prompts, replies and tool output stay on your machine. For optional goal suggestions, your selected service receives the first prompt, branch,
+        saved repository alias and eligible goal ids and titles. You can also choose to send the final reply and applicable limits to the decision service your workspace owner configures, or share a selected excerpt with named readers through Align. These documents are drafts under review.
       </p>
       <ul className="mb-6 list-disc pl-6">
         {sections.map((d) => (

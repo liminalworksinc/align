@@ -33,6 +33,9 @@ export interface Limit {
   /** 1..160 characters. */
   text: string;
   source: LimitSource | null;
+  path_anchors?: string[];
+  example_crossing?: string;
+  example_within?: string;
 }
 
 /** People's text on one line: control characters (C0, DEL, C1) become spaces, invisible characters are dropped and blank
@@ -60,19 +63,44 @@ export function limitsOf(row: { limits_json: string }): Limit[] {
 }
 
 /** A limit's source as sent: null/absent, or {kind, title?, date}. 400 naming `field` otherwise. */
-function sourceIn(v: unknown, field: string): LimitSource | null {
+function sourceIn(v: unknown): LimitSource | null {
   if (v === undefined || v === null) return null;
-  if (typeof v !== "object" || Array.isArray(v)) throw badRequest(`${field} must be an object with kind, title and date`);
+  if (typeof v !== "object" || Array.isArray(v)) throw badRequest("Enter a source for the limit.");
   const b = v as Body;
-  if (b.kind !== "meeting" && b.kind !== "manual") throw badRequest(`${field}.kind must be meeting or manual`);
-  if (b.title !== undefined && b.title !== null && typeof b.title !== "string") throw badRequest(`${field}.title must be a string`);
+  if (b.kind !== "meeting" && b.kind !== "manual") throw badRequest("Choose a meeting or a source written by hand.");
+  if (b.title !== undefined && b.title !== null && typeof b.title !== "string") throw badRequest("Enter a source title.");
   const title = typeof b.title === "string" ? cleanText(b.title) : "";
-  if (title.length > LIMIT_SOURCE_TITLE_MAX) throw badRequest(`${field}.title is too long (max ${LIMIT_SOURCE_TITLE_MAX} characters)`);
-  if (!isDay(b.date)) throw badRequest(`${field}.date must be a day like 2026-10-22`);
+  if (title.length > LIMIT_SOURCE_TITLE_MAX) throw badRequest(`Keep Source title to ${LIMIT_SOURCE_TITLE_MAX} characters or fewer.`);
+  if (!isDay(b.date)) throw badRequest("Enter a source date such as 2026-10-22.");
   return { kind: b.kind, title, date: b.date };
 }
 
-const sameLimit = (a: Omit<Limit, "id">, b: Omit<Limit, "id">) => a.type === b.type && a.text === b.text && JSON.stringify(a.source) === JSON.stringify(b.source);
+const sameLimit = (a: Omit<Limit, "id">, b: Omit<Limit, "id">) => a.type === b.type && a.text === b.text && JSON.stringify(a.source) === JSON.stringify(b.source)
+  && JSON.stringify(a.path_anchors ?? []) === JSON.stringify(b.path_anchors ?? [])
+  && a.example_crossing === b.example_crossing && a.example_within === b.example_within;
+
+function checkFields(b: Body): Pick<Limit, "path_anchors" | "example_crossing" | "example_within"> {
+  const fields: ReturnType<typeof checkFields> = {};
+  if (b.path_anchors !== undefined) {
+    if (!Array.isArray(b.path_anchors) || b.path_anchors.length > 5
+      || b.path_anchors.some((x) => typeof x !== "string" || x.length > 160 || !x.split("/").every(
+        (part: string) => part !== "." && part !== ".." && part.length > 0 && !/[\\:\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(part) && (part === "**" || !part.includes("**")),
+      ))) throw badRequest("Use up to five repo-relative patterns in File path anchors, one per line.");
+    if (b.path_anchors.length && b.type === "must") throw badRequest("Use File path anchors on a Must not or Out of scope limit.");
+    if (b.path_anchors.length) fields.path_anchors = [...new Set<string>(b.path_anchors)];
+  }
+  for (const [key, label] of [["example_crossing", "Example that crosses the limit"], ["example_within", "Example within the limit"]] as const) {
+    if (b[key] === undefined) continue;
+    if (typeof b[key] !== "string") throw badRequest(`Enter a sentence in ${label}.`);
+    const value = cleanText(b[key]);
+    if (value.length > LIMIT_TEXT_MAX) throw badRequest(`Keep ${label} to 160 characters or fewer.`);
+    if (value) fields[key] = value;
+  }
+  if (fields.example_crossing && fields.example_crossing.toLowerCase() === fields.example_within?.toLowerCase()) {
+    throw badRequest("Use different sentences for Example that crosses the limit and Example within the limit.");
+  }
+  return fields;
+}
 
 /** Validate a request's `limits` (the list a person sends) against the previous version's limits: a sent id is kept
  *  only when `prev` has it, else the limit gets a new one. A limit sent without an id that is word for word one of
@@ -80,18 +108,17 @@ const sameLimit = (a: Omit<Limit, "id">, b: Omit<Limit, "id">) => a.type === b.t
  *  400 V2Error naming the bad field. */
 export function limitsIn(v: unknown, prev: Limit[]): Limit[] {
   if (v === undefined) return prev;
-  if (!Array.isArray(v)) throw badRequest("limits must be a list");
-  if (v.length > LIMITS_MAX) throw badRequest(`limits: at most ${LIMITS_MAX}`);
-  const parsed = v.map((x, i) => {
-    const field = `limits[${i}]`;
-    if (!x || typeof x !== "object" || Array.isArray(x)) throw badRequest(`${field} must be an object with type and text`);
+  if (!Array.isArray(v)) throw badRequest("Enter the limits as a list.");
+  if (v.length > LIMITS_MAX) throw badRequest(`Enter up to ${LIMITS_MAX} limits.`);
+  const parsed = v.map((x) => {
+    if (!x || typeof x !== "object" || Array.isArray(x)) throw badRequest("Enter a type and statement for each limit.");
     const b = x as Body;
-    if (typeof b.type !== "string" || !(LIMIT_TYPES as readonly string[]).includes(b.type)) throw badRequest(`${field}.type must be one of ${LIMIT_TYPES.join(", ")}`);
-    if (typeof b.text !== "string") throw badRequest(`${field}.text must be a string`);
+    if (typeof b.type !== "string" || !(LIMIT_TYPES as readonly string[]).includes(b.type)) throw badRequest("Choose a limit type of Must, Must not or Out of scope.");
+    if (typeof b.text !== "string") throw badRequest("Enter a limit statement.");
     const text = cleanText(b.text);
-    if (!text) throw badRequest(`${field}.text is required`);
-    if (text.length > LIMIT_TEXT_MAX) throw badRequest(`${field}.text is too long (max ${LIMIT_TEXT_MAX} characters)`);
-    return { sentId: typeof b.id === "string" ? b.id : null, type: b.type as LimitType, text, source: sourceIn(b.source, `${field}.source`) };
+    if (!text) throw badRequest("Enter a limit statement.");
+    if (text.length > LIMIT_TEXT_MAX) throw badRequest(`Keep the limit statement to ${LIMIT_TEXT_MAX} characters or fewer.`);
+    return { sentId: typeof b.id === "string" ? b.id : null, type: b.type as LimitType, text, source: sourceIn(b.source), ...checkFields(b) };
   });
   const used = new Set<string>();
   // Sent ids prev has come first, so a limit without an id can't take an id another sent limit names.
@@ -102,6 +129,7 @@ export function limitsIn(v: unknown, prev: Limit[]): Limit[] {
     if (!id) id = prev.find((l) => !used.has(l.id) && !taken.has(l.id) && sameLimit(l, p))?.id ?? null;
     if (!id) id = newLimitId();
     taken.add(id);
-    return { id, type: p.type, text: p.text, source: p.source };
+    const { sentId: _sentId, ...content } = p;
+    return { id, ...content };
   });
 }

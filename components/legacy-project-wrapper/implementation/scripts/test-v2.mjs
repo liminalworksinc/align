@@ -691,15 +691,26 @@ if (build.status !== 0) {
   );
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
   const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
-  const modelHost = /api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.|ai-gateway\.vercel/i;
+  const modelHost = /api\.typesafe\.ai|api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.|ai-gateway\.vercel/i;
   const callers = sources.filter((f) => modelHost.test(readFileSync(f, "utf8")) || /from "(?:@anthropic-ai\/|openai|@ai-sdk\/|ai")/.test(readFileSync(f, "utf8")));
   const modelDeps = deps.filter((d) => /^(?:@anthropic-ai\/|openai$|@ai-sdk\/|ai$|@google\/generative-ai|@mistralai\/|cohere-ai)/.test(d));
   check(
-    "trust: the server calls no AI model provider (no model API host or SDK in app/, lib/, proxy.ts or package.json), so the subprocessor list rightly has none",
-    callers.length === 0 && modelDeps.length === 0 && /calls no AI model/.test(subprocessors),
+    "trust: the server calls no model provider and the draft lists the proposed recipients of direct, opt-in device requests",
+    callers.length === 0 && modelDeps.length === 0 &&
+      subprocessors.includes("The Align server makes no model requests.") &&
+      ["Proposed decision subprocessors", "TypeSafe", "OpenAI", "Google", "directly to the selected endpoint"]
+        .every((wording) => subprocessors.includes(wording)),
     `${callers.map((f) => path.relative(ROOT, f)).join(" ")} ${modelDeps.join(" ")}`,
   );
   const legal = ["privacy-policy.md", "dpa.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8"));
+  const trustOverview = readFileSync(path.join(ROOT, "docs/trust/security-overview.md"), "utf8");
+  const retentionWords = readFileSync(path.join(ROOT, "docs/RETENTION.md"), "utf8");
+  check("LIM-2526 and LIM-2528: both public disclosures explain the device audience, independent choices and their retention",
+    [legal[0], trustOverview].every((page) => /sharing device can read/i.test(page)
+      && /30 days/.test(page) && /claims expire at one hour and other activity at 24 hours/i.test(page)
+      && /workspace owner configures/.test(page) && /seven days/.test(page))
+      && !/`[a-z_]+_deleted`/.test(retentionWords));
+
   const pack = ["privacy-policy.md", "dpa.md", "subprocessors.md", "security-overview.md", "questionnaire.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n");
   check(
     "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack and the /trust page use legal-entity and contact substitutions with no postal-address placeholder, and no PRESEED marker is left in docs/trust or SECURITY.md (every package is merged and its claims checked)",
@@ -756,6 +767,15 @@ try {
       ![lPrivacy, lTrust].some((r) => /PRESEED-00|lib\/v2\/auth\.ts|<!-- (?:fly|lib|Counsel)/.test(r.text)),
     `${lPrivacy.status} ${lTrust.status}`,
   );
+  check("LIM-2528: Trust explains the default and both opt-ins without an internal excerpt counter",
+    lTrust.text.includes("By default, your prompts, replies and tool output stay on your machine")
+      && lTrust.text.includes("send the final reply and applicable limits to the decision service")
+      && lTrust.text.includes("share a selected excerpt with named readers through Align")
+      && !lTrust.text.includes("session_excerpts_deleted") && !lTrust.text.includes("local mode keeps everything"),
+    lTrust.status);
+  check("Trust and Privacy disclose the default and decision suggestion fields in local mode",
+    [lTrust, lPrivacy].every(({ text }) => /first prompt, branch[\s\S]{0,100}saved repository alias/i.test(text)
+      && /metadata by default/i.test(text)) && !/everything stays on your/i.test(lPrivacy.text));
   check(
     "local: the sign-in and request-access pages link to /privacy and /trust",
     [lSignIn, lRequest].every((r) => r.status === 200 && r.text.includes('href="/privacy"') && r.text.includes('href="/trust"')),
@@ -1063,17 +1083,21 @@ try {
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
   const requiredTables = [
-    "v2_budget_crossings", "v2_budget_stamps", "v2_spend_home_teams", "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups",
     "v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions",
     "v2_change_request_evidence", "v2_change_request_elements", "v2_spend_rollups", "v2_former_members",
     "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits",
     "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets",
     "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports",
     "v2_measure_readings", "v2_reading_credentials", "v2_goal_list_reviews", "v2_goal_list_snoozes", "v2_goal_review_releases",
+    "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions",
+    "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_spend_home_teams", "v2_budget_crossings", "v2_budget_stamps",
+    "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings",
+    "v2_workspace_decision_services", "v2_device_excerpt_consent", "v2_session_excerpts", "v2_excerpt_readers",
+    "v2_excerpt_share_ids", "v2_excerpt_storage_cleanup", "v2_model_send_windows", "v2_model_check_blocks",
     "ba_user", "ba_passkey",
   ];
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 31, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
-    SCHEMA_VERSION === 31 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 35, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 35 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
     requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   const budgetIndexes = withDb((d) => [
@@ -2176,6 +2200,84 @@ try {
     { session_key: S2a, kind: "edit", at: nowAt, repo_id: RID, path_hash: "d".repeat(32) },
     { session_key: S3a, kind: "edit", at: new Date(Date.now() - 25 * 3600 * 1000).toISOString(), repo_id: RID, path_hash: "e".repeat(32) },
   ];
+  const optSignals = (dev, ws, key, enabled) => call(dev.who, "PUT", `/api/v2/workspaces/${ws}/sessions/${key}/work-signals`, {
+    bearer: dev.access, body: { enabled },
+  });
+  const restrictSharing = (user, ws, tier, blocked) => call(user.who, "PATCH", `/api/v2/workspaces/${ws}/data-sharing`, {
+    cookie: user.cookie, body: { tier, blocked },
+  });
+  const blockModels = await restrictSharing(U1, A, 3, true);
+  const readModelPolicy = (dev, ws) => call(dev.who, "GET", `/api/v2/workspaces/${ws}/data-sharing`, { bearer: dev.access });
+  const [blockedModelPolicy, foreignModelPolicy, memberBlockModels] = await Promise.all([
+    readModelPolicy(D3, A), readModelPolicy(D3, B), restrictSharing(U3, A, 3, false),
+  ]);
+  const dispatchPolicy = (u) => call(u.who, "GET", `/api/v2/workspaces/${A}/data-sharing?for=model-suggestion`, { cookie: u.cookie });
+  const [memberDispatch, viewerDispatch, memberDeviceDispatch, viewerDeviceDispatch] = await Promise.all([
+    dispatchPolicy(U3),
+    dispatchPolicy(U4),
+    call(D3.who, "GET", `/api/v2/workspaces/${A}/data-sharing?for=model-suggestion`, { bearer: D3.access }),
+    call(D4.who, "GET", `/api/v2/workspaces/${A}/data-sharing?for=model-suggestion`, { bearer: D4.access }),
+  ]);
+  const unblockModels = await restrictSharing(U1, A, 3, false);
+  check("LIM-2527: only an owner can block model suggestions and a device can read the policy only in its workspace",
+    blockModels.json?.blocked?.includes(3) && blockedModelPolicy.json?.blocked?.includes(3) &&
+    foreignModelPolicy.status === 404 && memberBlockModels.status === 403 && !unblockModels.json?.blocked?.includes(3) &&
+    memberDispatch.status === 200 && viewerDispatch.status === 403 &&
+    memberDeviceDispatch.status === 200 && viewerDeviceDispatch.status === 403,
+    `${blockModels.text} ${blockedModelPolicy.text} ${foreignModelPolicy.text} ${memberBlockModels.text} ${unblockModels.text}`);
+  const servicePath = `/api/v2/workspaces/${A}/data-sharing`;
+  const setDecisionService = (u, address) => call(u.who, "PATCH", servicePath, { cookie: u.cookie, body: { decision_service_url: address } });
+  const address = "https://decision.example.test/v1/systemone";
+  const [deniedAddress, viewerAddress] = await Promise.all([setDecisionService(U3, address), setDecisionService(U4, address)]);
+  const badAddress = await setDecisionService(U1, "https://decision.example.test/v1/systemone?secret=value");
+  const configured = await setDecisionService(U1, address);
+  const readAddress = await readModelPolicy(D3, A);
+  const cleared = await setDecisionService(U1, null);
+  const restored = await setDecisionService(U1, address);
+  const finalClear = await setDecisionService(U1, null);
+  const endpointAudit = withDb((d) => d.prepare("SELECT * FROM v2_audit WHERE ws_id=? AND action='data_sharing.decision_service_changed'").all(A));
+  check("LIM-2527: the owner sets and clears the workspace decision service, replacements expire consent, and audit omits the address",
+    deniedAddress.status === 403 && viewerAddress.status === 403 && badAddress.status === 400 && configured.status === 200 &&
+    readAddress.json?.decision_service?.url === address && typeof readAddress.json.decision_service.revision === "string" &&
+    cleared.json?.decision_service === null && restored.json?.decision_service?.revision !== readAddress.json.decision_service.revision &&
+    finalClear.json?.decision_service === null && endpointAudit.length === 4 && !JSON.stringify(endpointAudit).includes(address),
+    JSON.stringify({ deniedAddress, viewerAddress, badAddress, configured, cleared, readAddress, restored, finalClear, endpointAudit }));
+  const signalsByDefault = await actPost(D3, [okItems[0]], { body: { items: [okItems[0]], work_signals_version: 1 } });
+  const signalsOther = await optSignals(D1, A, S3a, true);
+  const signalsAsMember = await restrictSharing(U3, A, 1, true);
+  await restrictSharing(U1, A, 1, true);
+  const blockedOpt = await optSignals(D3, A, S3a, true);
+  const signalsBlocked = await actPost(D3, [okItems[0]], { body: { items: [okItems[0]], work_signals_version: 1 } });
+  await restrictSharing(U1, A, 1, false);
+  const signalsStillOff = await actPost(D3, [okItems[0]], { body: { items: [okItems[0]], work_signals_version: 1 } });
+  const optOwn = await optSignals(D3, A, S3a, true);
+  check("LIM-2526: work signals need device consent, a workspace ban wins, and removing a ban gives no consent",
+    [signalsByDefault, signalsBlocked, signalsStillOff].every((r) => r.json?.refused?.[0]?.reason === "work_signals_off")
+      && signalsOther.status === 404 && signalsAsMember.status === 403 && blockedOpt.json?.enabled === false && optOwn.json?.enabled === true,
+    JSON.stringify({ signalsByDefault, signalsBlocked, signalsStillOff, optOwn }));
+  // A device carried over from schema 26 can still use the old activity request for an explicit local choice.
+  const legacyKey = S2a;
+  const legacyLabel = { ...okItems[1], session_key: legacyKey, text: "Legacy client branch label" };
+  const oldMetadata = await actPost(D2, [{ ...legacyLabel, text: null }]);
+  const upgradeAdvice = await actPost(D2, [legacyLabel]);
+  withDb((d) => {
+    if (d.prepare("PRAGMA table_info(v2_devices)").all().some((column) => column.name === "legacy_work_signals")) {
+      d.prepare("UPDATE v2_devices SET legacy_work_signals = 1 WHERE id = ?").run(D2.id);
+    }
+  });
+  const oldNamed = await actPost(D2, [legacyLabel]);
+  const modernWithoutConsent = await actPost(D2, [legacyLabel], { body: { items: [legacyLabel], work_signals_version: 1 } });
+  await restrictSharing(U1, A, 1, true);
+  const blockedLegacy = await actPost(D2, [legacyLabel]);
+  await restrictSharing(U1, A, 1, false);
+  await optSignals(D2, A, legacyKey, false);
+  const optedOutLegacy = await actPost(D2, [legacyLabel]);
+  check("LIM-2526: an older paired device keeps metadata and opted-in named activity, subject to a ban and explicit opt-out",
+    oldMetadata.json?.accepted === 1 && /Update Align/.test(upgradeAdvice.json?.refused?.[0]?.reason)
+      && oldNamed.json?.accepted === 1 && modernWithoutConsent.json?.accepted === 0
+      && blockedLegacy.json?.accepted === 0 && optedOutLegacy.json?.accepted === 0,
+    [oldMetadata, upgradeAdvice, oldNamed, modernWithoutConsent, blockedLegacy, optedOutLegacy].map((r) => r.text).join(" | "));
+  withDb((d) => d.prepare("DELETE FROM v2_activity WHERE session_key = ? AND repo_id = ?").run(legacyKey, RID));
   const ap = await actPost(D3, okItems);
   check("activity: a device posts its own sessions' items; another device's session and items older than 24 h are skipped", ap.status === 200 && ap.json.accepted === 3, ap.text);
   const apAhead = await actPost(D3, [{ ...okItems[1], at: new Date(Date.now() + 10 * 60_000).toISOString() }]);
@@ -2291,6 +2393,21 @@ try {
   const rebindOwn = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
   const spendRev = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
   check("alignment: revoke is prospective (in-flight usage of the old epoch still lands under G1); G1 needs alignment again; picking an own goal resumes sharing", inflight.json?.accepted === 1 && rebindG1.status === 403 && rebindOwn.status === 200 && spendRev.rows.find((r) => r.goal?.id === G1.id)?.requests === 3, `${inflight.text} ${rebindG1.status} ${rebindOwn.text}`);
+  const unallocatedResults = [];
+  for (const origin of ["suggested_rule", "suggested_agent", "suggested_model"]) {
+    const body = { epoch_id: epochId(), goal_id: null, starts_at: new Date().toISOString(), origin };
+    unallocatedResults.push(await epoch(D3, S3a, body), await epoch(D3, S3a, body));
+  }
+  check("LIM-2527: epochs without a goal cannot record any suggestion origin",
+    unallocatedResults.every((r) => r.status === 200 && r.json?.origin === null),
+    unallocatedResults.map((r) => r.text).join(" "));
+  const ruleEpochBody = { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString(), origin: "suggested_rule" };
+  const [ruleEpoch, ruleRetry] = await Promise.all([epoch(D3, S3a, ruleEpochBody), epoch(D3, S3a, ruleEpochBody)]);
+  const rulesSession = await call("U3", "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: U3.cookie });
+  check("LIM-2527: a confirmed rules suggestion keeps its origin on retry and the caller's session list",
+    ruleEpoch.status === 200 && ruleEpoch.json?.origin === "suggested_rule" && ruleRetry.text === ruleEpoch.text &&
+      rulesSession.json?.mine?.some((s) => s.session_key === S3a && s.current_epoch?.origin === "suggested_rule"),
+    `${ruleEpoch.text} ${ruleRetry.text} ${JSON.stringify(rulesSession.json?.mine?.find((s) => s.session_key === S3a))}`);
   const wd = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
   const wdo = await act(U3, wd.json.id, "withdraw", { revision: 1 });
   const rj = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
@@ -2658,7 +2775,7 @@ try {
   check(
     "c13 W3 (E2E-WEB cycle 13): a decline reason, a counter's condition or note, a goal title, a measure and a limit of only invisible characters (two zero-width spaces, a word joiner, U+FE0F, a Hangul filler, an accent and a joiner with spaces) are cleaned as names are and then missing: 400 \"<field> is required\", nothing recorded",
     w3Reject.every((r) => r.status === 400 && r.json?.message === "reason is required") && w3Cond.status === 400 && w3Cond.json?.message === "condition is required" && w3Note.status === 400 && w3Note.json?.message === "note is required" &&
-      w3Title.status === 400 && w3Title.json?.message === "title is required" && w3Measure.status === 400 && /text is required/.test(w3Measure.json?.message ?? "") && w3Limit.status === 400 && w3Limit.json?.message === "limits[0].text is required" &&
+      w3Title.status === 400 && w3Title.json?.message === "title is required" && w3Measure.status === 400 && /text is required/.test(w3Measure.json?.message ?? "") && w3Limit.status === 400 && w3Limit.json?.message === "Enter a limit statement." &&
       afterW3.json?.state === "pending" && afterW3.json.revision === 1,
     `${w3Reject.map((r) => r.text).join(" | ")} | ${w3Cond.text} | ${w3Note.text} | ${w3Title.text} | ${w3Measure.text} | ${w3Limit.text} | ${afterW3.json?.state}`,
   );
@@ -2961,6 +3078,54 @@ try {
         const card = await show(`[data-cr="${current.json.id}"] [data-precedents]`);
         await page.goto(`${BASE}/app/w/${A}/requests?review=${goal.id}.${current.json.id}`, { waitUntil: "networkidle0" });
         const drawer = await show(`[data-review="${current.json.id}"] [data-precedents]`);
+        const limitGoal = (await mkGoal(U3, { title: "Keep ledger data stable", team_id: P1, limits: [{
+          type: "must_not", text: "Rewrite ledger data.", path_anchors: ["ledger/old/**"],
+          example_crossing: "I will replace the existing ledger.", example_within: "I will read the current ledger.",
+        }] })).json;
+        const requested = await propose(U1, limitGoal.id, { base_version: 1, changes: { limits: [{
+          ...limitGoal.limits[0], path_anchors: ["ledger/new/**"], example_crossing: "I will replace stored transactions.", example_within: "",
+        }] }, reason: "Clarify the data boundary" });
+        await page.goto(`${BASE}/app/w/${A}/requests?review=${limitGoal.id}.${requested.json?.id}`, { waitUntil: "networkidle0" });
+        const changedLimit = await page.$eval(`[data-review="${requested.json?.id}"] [data-compare] [data-field="limits"]`, (field) => ({
+          before: field.children[1].textContent, after: field.children[2].textContent,
+          marked: !!field.children[2].querySelector('[data-mark="changed"]'),
+          fits: document.scrollingElement.scrollWidth <= innerWidth && field.scrollWidth <= field.clientWidth,
+        })).catch(() => ({}));
+        check("LIM-2526 (390 px): the approval drawer shows both values of changed limit fields and shows when an example was removed",
+          changedLimit.before?.includes("ledger/old/**") && changedLimit.before.includes("replace the existing ledger")
+            && changedLimit.before.includes("read the current ledger") && changedLimit.after?.includes("ledger/new/**")
+            && changedLimit.after.includes("replace stored transactions") && changedLimit.after.includes("Example within the limit")
+            && changedLimit.after.includes("None") && changedLimit.marked && changedLimit.fits, JSON.stringify(changedLimit));
+        await page.goto(`${BASE}/app/w/${A}/goals/${limitGoal.id}`, { waitUntil: "networkidle0" });
+        const changedLimitCard = await page.$eval(`[data-cr="${requested.json?.id}"] [data-compare]`, (section) => ({
+          before: section.querySelector('[data-side="approved"]')?.textContent,
+          after: section.querySelector('[data-side="proposed"]')?.textContent,
+          fits: document.scrollingElement.scrollWidth <= innerWidth,
+        })).catch(() => ({}));
+        check("LIM-2526 (390 px): approval on the goal shows before and after limit details",
+          changedLimitCard.before?.includes("ledger/old/**") && changedLimitCard.before.includes("read the current ledger")
+            && changedLimitCard.after?.includes("ledger/new/**") && changedLimitCard.after.includes("replace stored transactions")
+            && changedLimitCard.after.includes("Example within the limit") && changedLimitCard.after.includes("None") && changedLimitCard.fits,
+          JSON.stringify(changedLimitCard));
+        const approval = `[data-cr="${requested.json?.id}"]`;
+        await page.locator(`${approval} [data-decision="Suggest a change"]`).click();
+        const counterSelector = `${approval} [data-decision-input="counter"] form`;
+        const counterForm = await page.waitForSelector(counterSelector, { visible: true });
+        await page.type(`${counterSelector} textarea[required]`, "Clarify the example.");
+        const counterControls = await counterForm.evaluate((form) => {
+          const details = [...form.querySelectorAll("details")].find((d) => d.querySelector("summary")?.textContent === "Examples and file paths");
+          details.open = true;
+          const crossing = [...details.querySelectorAll("label")].find((l) => l.innerText.startsWith("Example that crosses the limit")).querySelector("input");
+          crossing.dataset.crossingTest = "yes";
+          return form.querySelector('button[type="submit"]')?.disabled;
+        });
+        await page.$eval('input[data-crossing-test]', (field) => field.select());
+        await page.type('input[data-crossing-test]', "I will rewrite the ledger records.");
+        await page.waitForFunction((selector) => document.querySelector(`${selector} button[type="submit"]`)?.disabled === false, {}, counterSelector);
+        check("LIM-2526 (390 px): changing only the crossing example enables review of a counter", counterControls === true);
+        await page.goto(`${BASE}/app/w/${A}/requests?review=${goal.id}.${current.json.id}`, { waitUntil: "networkidle0" });
+        await show(`[data-review="${current.json.id}"] [data-precedents]`);
+
         check("LIM-2522 (390 px): the goal and Requests drawer show collapsed earlier decisions with readable labels, launch and decision links",
           [card, drawer].every((s) => s.collapsed && s.fits && s.text.includes("Earlier decisions on the same items (3)") &&
             s.text.includes("v1: Approved") && s.text.includes("Launched as v2") && s.text.includes(revisedLimit.text) &&
@@ -4583,6 +4748,12 @@ try {
     await put(D1, roundingSession);
     await epoch(D1, roundingSession, { epoch_id: roundingEpoch, goal_id: G1.id, starts_at: T0, origin: "hand" });
     await upload(D1, roundingSession, [usageRow(D1, "spend-rounding", roundingEpoch, { est_list_usd_micros: 24_690 })]);
+    const unpricedGoal = (await mkGoal(U1, { title: "Unpriced work only", visibility: "workspace" })).json;
+    const unpricedSession = sessionKey(D1, A, "claude-code", "spend-unpriced-only");
+    const unpricedEpoch = epochId();
+    await put(D1, unpricedSession);
+    await epoch(D1, unpricedSession, { epoch_id: unpricedEpoch, goal_id: unpricedGoal.id, starts_at: T0, origin: "suggested_rule" });
+    const unpricedUpload = await upload(D1, unpricedSession, [usageRow(D1, "spend-unpriced-only", unpricedEpoch, { est_list_usd_micros: null })]);
     const { default: puppeteer } = await import("puppeteer-core");
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
     try {
@@ -4613,6 +4784,79 @@ try {
         wide.length === 0 && /Sends you back to/.test(appsRow) && /Last connected/.test(appsRow) && /Last read the goals/.test(appsRow) && errors.length === 0,
         `${wide.join(" | ")} ${errors.join(" | ")}`,
       );
+      await page.goto(`${BASE}/app/w/${A}/people`, { waitUntil: "networkidle0" });
+      const restrictions = await page.waitForSelector('input[name="restrict-tier-2"]');
+      await restrictions.click();
+      await page.waitForFunction(() => [...document.querySelectorAll("label")].some((l) => l.innerText === "Block Derived results (proposed)" && l.querySelector("input")?.checked));
+      const phoneRestrictions = await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth);
+      const setTier = async (tier, checked) => {
+        const selector = `input[name="restrict-tier-${tier}"]`;
+        await page.locator(selector).click();
+        await page.waitForFunction((sel, value) => {
+          const input = document.querySelector(sel);
+          return input?.checked === value && !input.disabled;
+        }, {}, selector, checked);
+      };
+      for (const tier of [1, 3, 4]) await setTier(tier, true);
+      await page.reload({ waitUntil: "networkidle0" });
+      const savedTiers = await page.$$eval('input[name^="restrict-tier-"]:checked', (inputs) => inputs.map((input) => input.name));
+      for (const tier of [1, 3, 4]) await setTier(tier, false);
+      check("LIM-2526 (390 px): all four independent settings survive reload",
+        savedTiers.join() === "restrict-tier-1,restrict-tier-2,restrict-tier-3,restrict-tier-4", savedTiers);
+      await page.click('input[name="restrict-tier-2"]');
+      await page.waitForFunction(() => [...document.querySelectorAll("label")].some((l) => l.innerText === "Block Derived results (proposed)" && l.querySelector("input:not(:checked)")));
+      check("LIM-2526 (Chrome 390px): a workspace owner can toggle sharing restrictions without horizontal scrolling", phoneRestrictions, page.url());
+      const modelLabel = 'Block Model-based goal suggestions (proposed)';
+      await page.click('input[name="restrict-tier-3"]');
+      await page.waitForFunction((label) => [...document.querySelectorAll("label")].some((l) => l.innerText === label && l.querySelector("input")?.checked), {}, modelLabel);
+      check("LIM-2527 (Chrome 390px): model suggestion restrictions fit and use a plain label",
+        await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), page.url());
+      await page.click('input[name="restrict-tier-3"]');
+      await page.waitForFunction(() => !!document.querySelector('input[name="restrict-tier-3"]:not(:checked)'));
+      const field = 'form input[type="url"][maxlength="2048"]';
+      const save = 'form:has(input[type="url"][maxlength="2048"]) button[type="submit"]';
+      await page.waitForSelector(field, { visible: true });
+      const setAddress = async (value) => {
+        await page.$eval(field, (input) => { input.focus(); input.select(); });
+        await page.keyboard.press("Backspace");
+        if (value) await page.type(field, value);
+        const [response] = await Promise.all([
+          page.waitForResponse((r) => r.url() === BASE + servicePath && r.request().method() === "PATCH"),
+          page.locator(save).click(),
+        ]);
+        return response;
+      };
+      const invalidService = await setAddress(address + "?secret=value");
+      await page.waitForSelector('form:has(input[type="url"][maxlength="2048"]) [role="alert"]', { visible: true });
+      const addressField = await page.$eval(field, (input) => ({
+        name: document.getElementById(input.getAttribute("aria-labelledby"))?.textContent,
+        error: input.closest("label")?.innerText,
+      }));
+      const validService = await setAddress(address);
+      const savedService = (await validService.json()).decision_service;
+      await page.waitForFunction((input, button) => !document.querySelector(input)?.disabled && document.querySelector(button)?.disabled, {}, field, save);
+      const replacementAddress = "https://replacement.example.test/v1/systemone";
+      await call("U1", "PATCH", servicePath, { cookie: U1.cookie, body: { decision_service_url: replacementAddress } });
+      await Promise.all([
+        page.waitForResponse((r) => r.url() === BASE + servicePath && r.request().method() === "GET"),
+        page.locator('input[name="restrict-tier-3"]').click(),
+      ]);
+      await page.waitForFunction((selector, value) => document.querySelector(selector)?.value === value, {}, field, replacementAddress);
+      const renderedAfterReload = await page.$eval(field, (input) => input.value);
+      const renderedSaved = await page.$eval(save, (button) => button.disabled);
+      await page.reload({ waitUntil: "networkidle0" });
+      await page.waitForSelector(field);
+      const renderedAfterNavigation = await page.$eval(field, (input) => input.value);
+      check("LIM-2527 (Chrome 390px): the address field follows the saved setting after refresh and reload",
+        renderedAfterReload === replacementAddress && renderedAfterNavigation === replacementAddress && renderedSaved,
+        JSON.stringify({ renderedAfterReload, renderedAfterNavigation, renderedSaved }));
+      await restrictSharing(U1, A, 3, false);
+      const removedService = await setAddress("");
+      check("LIM-2527 (Chrome 390px): the owner can fix an invalid address, save the recipient and clear it",
+        invalidService.status() === 400 && addressField.name === "Decision service address" &&
+        addressField.error?.includes("must be an HTTPS URL") && savedService?.url === address &&
+        (await removedService.json()).decision_service === null && await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth),
+        JSON.stringify({ addressField, savedService }));
       for (const width of [390, 1280]) {
         await page.setViewport({ width, height: 844 });
         await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
@@ -4647,9 +4891,17 @@ try {
           }, G1.title);
           check("LIM-2521 (ui): a goal's displayed sharing source costs add up to its displayed total",
             costs.total === "$0.04" && costs.parts.join() === "$0.01,$0.03", JSON.stringify(costs));
+          const unknown = await page.evaluate((title) => {
+            const row = [...document.querySelectorAll("tbody tr")].find((tr) => tr.firstElementChild?.firstElementChild?.textContent === title);
+            return { total: row?.querySelector('[data-label="Estimated list cost"]')?.innerText, part: row?.querySelector("details[open] dd")?.innerText };
+          }, unpricedGoal.title);
+          check("Spend shows unknown for both a fully unpriced goal row and its sharing source",
+            unpricedUpload.json?.accepted === 1 && /^Unknown\s+1 unpriced$/.test(unknown.total ?? "") &&
+              unknown.part === "1 request · Unknown", JSON.stringify(unknown));
         }
       }
       await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${roundingSession}`, { cookie: U1.cookie });
+      await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${unpricedSession}`, { cookie: U1.cookie });
       await page.setViewport({ width: 390, height: 844 });
       // -- main #44 on v2: compact chrome on a phone, 44 px action buttons, the main pages at desktop widths, the
       //    workspace switcher at 700, one read of the connected apps per page (no poll), and the goal page's
@@ -5429,8 +5681,14 @@ try {
     const badKind = await vA(LA, { limits: [{ type: "must", text: "Keep it small", source: { kind: "prompt", title: "x", date: "2026-10-01" } }] });
     const notList = await vA(LA, { limits: "Keep it small" });
     check(
-      "limits: 6 limits -> 400 limits: at most 5; 161 characters -> 400; an unknown type, a bad date, a source kind other than meeting or manual, or a non-list -> 400 naming the field; the goal stays at version 1",
-      six.status === 400 && six.json?.message === "limits: at most 5" && long.status === 400 && /limits\[0\]\.text/.test(long.json?.message) && badType.status === 400 && /limits\[0\]\.type/.test(badType.json?.message) && badDate.status === 400 && /limits\[0\]\.source\.date/.test(badDate.json?.message) && badKind.status === 400 && /source\.kind/.test(badKind.json?.message) && notList.status === 400 && (await lw(LA, "GET", `/goals/${GA.id}`)).json?.goal?.version === 1,
+      "limits: invalid counts, statements, types and sources return 400 with readable labels and leave the version unchanged",
+      six.status === 400 && six.json?.message === "Enter up to 5 limits."
+        && long.status === 400 && long.json?.message === "Keep the limit statement to 160 characters or fewer."
+        && badType.status === 400 && badType.json?.message === "Choose a limit type of Must, Must not or Out of scope."
+        && badDate.status === 400 && badDate.json?.message === "Enter a source date such as 2026-10-22."
+        && badKind.status === 400 && badKind.json?.message === "Choose a meeting or a source written by hand."
+        && notList.status === 400 && notList.json?.message === "Enter the limits as a list."
+        && (await lw(LA, "GET", `/goals/${GA.id}`)).json?.goal?.version === 1,
       `${six.text} ${long.text} ${badType.text} ${badDate.text} ${badKind.text} ${notList.text}`,
     );
     const keptId = GA.limits[0].id;
@@ -5606,6 +5864,40 @@ try {
         await Promise.all([pc.waitForNavigation({ waitUntil: "networkidle0" }), click(pc, "Add to a new version")]);
         await pc.waitForFunction(() => [...document.querySelectorAll("input")].some((i) => i.value === "Invoice exports are out of scope for the billing dashboard."), { timeout: 15000 });
         const onGoalPage = new URL(pc.url()).pathname === `/app/w/${LW}/goals/${GB.id}`;
+        await pc.setViewport({ width: 390, height: 844 });
+        const form = await pc.evaluate(() => {
+          const details = [...document.querySelectorAll("details")].filter((d) => d.querySelector("summary")?.innerText === "Examples and file paths");
+          details.at(-1).open = true;
+          const anchor = [...details.at(-1).querySelectorAll("label")].find((l) => l.innerText.startsWith("File path anchors")).querySelector("textarea");
+          anchor.dataset.anchorTest = "yes";
+          return { labels: details.at(-1).innerText, fits: document.scrollingElement.scrollWidth <= innerWidth };
+        });
+        await pc.type("textarea[data-anchor-test]", "/private");
+        await click(pc, `Save version ${gbVersion + 1}`);
+        await pc.waitForFunction(() => document.body.innerText.includes("Use up to five repo-relative patterns in File path anchors"));
+        const retained = await pc.$eval("textarea[data-anchor-test]", (field) => field.value);
+        await pc.$eval("textarea[data-anchor-test]", (field) => field.setSelectionRange(0, field.value.length));
+        await pc.type("textarea[data-anchor-test]", "services/invoices/**");
+        await pc.$eval("textarea[data-anchor-test]", (field) => {
+          const labels = [...field.closest("details").querySelectorAll("label")];
+          for (const [i, word] of ["Example that crosses the limit", "Example within the limit"].entries()) {
+            labels.find((l) => l.innerText.startsWith(word)).querySelector("input").dataset.exampleTest = String(i);
+          }
+        });
+        const crossingInput = 'input[data-example-test="0"]';
+        const withinInput = 'input[data-example-test="1"]';
+        const repeatedExample = "I will replace the invoice exports.";
+        await pc.type(crossingInput, repeatedExample);
+        await pc.type(withinInput, repeatedExample);
+        await click(pc, `Save version ${gbVersion + 1}`);
+        await pc.waitForFunction(() => document.body.innerText.includes("Use different sentences for Example that crosses the limit and Example within the limit"));
+        const retainedExamples = await pc.$$eval("input[data-example-test]", (fields) => fields.map((field) => field.value));
+        await pc.$eval(withinInput, (field) => field.select());
+        await pc.type(withinInput, "I will read the invoice exports.");
+        check("LIM-2526 (Chrome 390px): invalid matching examples stay visible for correction",
+          retainedExamples.length === 2 && retainedExamples.every((example) => example === repeatedExample), retainedExamples);
+        check("LIM-2526 (Chrome 390px): the limit editor fits with its examples open and reports an invalid path using the visible label",
+          form.fits && form.labels.includes("Example that crosses the limit") && form.labels.includes("Example within the limit") && retained === "/private", JSON.stringify(form));
         await click(pc, `Save version ${gbVersion + 1}`);
         await pc.waitForFunction((v) => document.body.innerText.includes(`version ${v}`) && document.body.innerText.includes("Limits"), { timeout: 15000 }, gbVersion + 1);
         const gbNow = (await lw(LC, "GET", `/goals/${GB.id}`)).json.goal;
@@ -5838,10 +6130,10 @@ try {
   );
 
   // The feed: ETag / 304, for a device too, and the same set as the browser; filters.
-  const kDevice = (u) => {
+  const kDevice = (u, workspace = AK) => {
     const keys = newDeviceKeys();
     const d = insertDevice(u.id, `${u.who}'s laptop`);
-    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AK));
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, workspace));
     return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
   };
   const DKR = kDevice(KR);
@@ -5914,27 +6206,558 @@ try {
   // ==== port:activity ====
   // Goal activity (PORT-003) on the asks workspace: Kai (Product lead) and Kim (Product member) share sessions toward
   // Kai's workspace-visible Product goal; one of Kai's sessions worked on it only 20 to 15 days ago.
-  const GW = (await ka(KL, "POST", "/goals", { title: "Faculty sign-on", visibility: "workspace", team_id: TP })).json;
+  const GW = (await ka(KL, "POST", "/goals", { title: "Faculty sign-on", visibility: "workspace", team_id: TP,
+    limits: [{ type: "out_of_scope", text: "Leave billing alone.", path_anchors: ["services/billing/**"],
+      example_crossing: "I will alter the invoice route.", example_within: "I will leave the invoice route alone." }] })).json;
   const DKL = kDevice(KL);
   const DKM = kDevice(KM);
   const hAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
-  const kShare = async (dev, harness, native, startedH, epochs, usage) => {
-    const key = sessionKey(dev, AK, harness, native);
-    await call(dev.who, "PUT", `/api/v2/workspaces/${AK}/sessions/${key}`, { bearer: dev.access, body: { harness, repo_key: repoKey(dev, AK, "/src/sso"), started_at: hAgo(startedH), title: `ACT-TITLE ${native}` } });
+  const kShare = async (dev, harness, native, startedH, epochs, usage, workspace = AK) => {
+    const key = sessionKey(dev, workspace, harness, native);
+    await call(dev.who, "PUT", `/api/v2/workspaces/${workspace}/sessions/${key}`, { bearer: dev.access, body: { harness, repo_key: repoKey(dev, workspace, "/src/sso"), started_at: hAgo(startedH), title: `ACT-TITLE ${native}` } });
     const ids = [];
     for (const [goalId, h] of epochs) {
       const id = epochId();
       ids.push(id);
-      await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: id, goal_id: goalId, starts_at: hAgo(h), root_turn: null, cause: "manual" } });
+      await call(dev.who, "POST", `/api/v2/workspaces/${workspace}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: id, goal_id: goalId, starts_at: hAgo(h), root_turn: null, cause: "manual" } });
     }
-    const up = await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: usage.map(([i, h]) => usageRow(dev, `${native}-${i}`, ids[0], { ts: hAgo(h) })) } });
-    return { key, accepted: up.json?.accepted };
+    const up = await call(dev.who, "POST", `/api/v2/workspaces/${workspace}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: usage.map(([i, h]) => usageRow(dev, `${native}-${i}`, ids[0], { ts: hAgo(h) })) } });
+    return { key, epoch: ids[0], accepted: up.json?.accepted };
   };
   const kSA = await kShare(DKL, "claude-code", "act-a", 4, [[GW.id, 4]], [[1, 0.5]]);
   const kSB = await kShare(DKM, "codex", "act-b", 4, [[GW.id, 4]], [[1, 3]]);
   const kSC = await kShare(DKL, "claude-code", "act-c", 20 * 24, [[GW.id, 20 * 24], [null, 15 * 24]], [[1, 19 * 24]]);
+  const narrowGoal = (await ka(KL, "POST", "/goals", { title: "Private activity goal", visibility: "team", team_id: TP })).json;
+  const activityMoved = await kShare(DKL, "claude-code", "private-buffered-activity", 4, [[narrowGoal?.id, 4], [GW.id, 1]], []);
+  await optSignals(DKL, AK, activityMoved.key, true);
+  const historicalName = "private-before-move.txt";
+  const historicalActivity = await call(DKL.who, "POST", `/api/v2/workspaces/${AK}/activity`, {
+    bearer: DKL.access, body: { work_signals_version: 2, items: [
+      { session_key: activityMoved.key, epoch_id: activityMoved.epoch, kind: "edit", at: hAgo(2),
+        repo_id: "9".repeat(32), path_hash: "8".repeat(32), path: historicalName },
+    ] },
+  });
+  const outsiderActivity = await call(DKR.who, "GET", `/api/v2/workspaces/${AK}/activity`, { bearer: DKR.access });
+  const audience = withDb((d) => d.prepare("SELECT goal_id, path FROM v2_activity WHERE session_key=?").get(activityMoved.key));
+  check("LIM-2526: buffered named activity retains the earlier goal after a switch",
+    historicalActivity.json?.accepted === 1 && audience?.goal_id === narrowGoal?.id && audience?.path === historicalName
+      && !outsiderActivity.text.includes(historicalName), JSON.stringify({ historicalActivity: historicalActivity.json, audience }));
+  withDb((d) => d.prepare("DELETE FROM v2_sessions WHERE ws_id=? AND session_key=?").run(AK, activityMoved.key));
+
   const ACT_CANARY = `ACT-CANARY-${randomBytes(4).toString("hex")}`;
+  const racePath = `/api/v2/workspaces/${AK}/data-sharing`;
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'owner' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  let finishRestriction;
+  const restriction = new Promise((resolve, reject) => {
+    const req = http.request(BASE + racePath, {
+      method: "PATCH", headers: { cookie: KL.cookie, "content-type": "application/json" },
+    }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode));
+    });
+    req.on("error", reject);
+    req.write('{"tier":3,');
+    finishRestriction = () => req.end('"blocked":true}');
+  });
+  await sleep(250);
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  finishRestriction();
+  const restrictionStatus = await restriction;
+  const blockedAfterRace = (await call(KO.who, "GET", racePath, { cookie: KO.cookie })).json?.blocked;
+  check("LIM-2526: demotion during an unfinished restriction request takes effect at the write",
+    restrictionStatus === 403 && !blockedAfterRace?.includes(3), `${restrictionStatus} ${blockedAfterRace}`);
   const sigAt = new Date().toISOString();
+  await optSignals(DKL, AK, kSA.key, true);
+  const resultsUrl = `/api/v2/workspaces/${AK}/sessions/${kSA.key}/analysis`;
+  const resultConsent = (enabled) => call(DKL.who, "PUT", "/api/v2/devices/self/data-sharing", { bearer: DKL.access, body: { enabled } });
+  const eventsBeforeResults = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id=?").get(AK).n);
+  const beforeConsent = { id: "b".repeat(32), epoch_id: kSA.epoch, goal_version: 1, limit_id: GW.limits[0].id,
+    evidence: "example", digest: "f".repeat(32), turn_started_at: new Date().toISOString() };
+  const sendFinding = (body) => call(DKL.who, "POST", resultsUrl, { bearer: DKL.access, body });
+  const getFinding = (dev) => call(dev.who, "GET", resultsUrl, { bearer: dev.access });
+  const defaultOff = await sendFinding(beforeConsent);
+  const consentOn = await resultConsent(true);
+  const retrospective = await sendFinding(beforeConsent);
+  const finding = { ...beforeConsent, id: "c".repeat(32), turn_started_at: new Date().toISOString() };
+  await resultConsent(true);
+  check("LIM-2526: the same record from before device consent is refused after opt-in", retrospective.status === 403, retrospective.text);
+  const rawExtra = await sendFinding({ ...finding, reply: "REPLY-PRIVATE-CANARY" });
+  const wrongLimit = await sendFinding({ ...finding, limit_id: "lim_aaaaaaaaaaaa" });
+  const acceptedFinding = await sendFinding(finding);
+  const retriedFinding = await sendFinding(finding);
+  const changedFinding = await sendFinding({ ...finding, digest: "a".repeat(32) });
+  const ownFindings = await getFinding(DKL);
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'viewer' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  const viewerPreflight = await call(DKL.who, "GET", resultsUrl + "?status=1", { bearer: DKL.access });
+  const viewerWrite = await sendFinding(finding);
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  check("LIM-2526: demoting a sharing member to viewer disables their preflight and prevents writes",
+    viewerPreflight.status === 200 && viewerPreflight.json?.enabled === false && viewerWrite.status === 403,
+    `${viewerPreflight.text} ${viewerWrite.text}`);
+  const otherFindings = await getFinding(DKM);
+  const secondPairing = kDevice(KL);
+  const secondPairingRead = await getFinding(secondPairing);
+  const dataOwner = await call(KO.who, "GET", resultsUrl, { cookie: KO.cookie });
+  await restrictSharing(KO, AK, 2, true);
+  const findingsBlocked = await sendFinding({ ...finding, id: "a".repeat(32) });
+  const blockedRead = await getFinding(DKL);
+  const readableRetry = await sendFinding(finding);
+  const deleteOther = await call(DKM.who, "DELETE", resultsUrl, { bearer: DKM.access });
+  const deleteMine = await call(DKL.who, "DELETE", resultsUrl, { bearer: DKL.access });
+  await restrictSharing(KO, AK, 2, false);
+  const deletedRetry = await sendFinding(finding);
+  check("LIM-2526: a finding retry stays deleted even after a workspace restriction is lifted",
+    deletedRetry.status === 410 && (await getFinding(DKL)).json?.findings?.length === 0, deletedRetry.text);
+  await resultConsent(false);
+  const afterOff = await sendFinding(finding);
+  check("LIM-2526: proposed tier 2 is independent of work signals, validates closed fields and requires its own consent",
+    defaultOff.status === 403 && consentOn.json?.enabled === true && rawExtra.status === 400 && wrongLimit.status === 404
+      && acceptedFinding.status === 200 && retriedFinding.status === 200 && changedFinding.status === 409
+      && ownFindings.json?.findings?.length === 1 && Object.entries(finding).every(([k, v]) => ownFindings.json.findings[0][k] === v)
+      && afterOff.status === 403,
+    [defaultOff, consentOn, rawExtra, wrongLimit, acceptedFinding, retriedFinding, changedFinding, ownFindings, afterOff].map((r) => r.text).join(" | "));
+  check("LIM-2526: proposed tier 2 findings are private to their sending device and deletable under a workspace ban",
+    otherFindings.status === 404 && secondPairingRead.status === 404 && dataOwner.status === 404 && findingsBlocked.status === 403
+      && readableRetry.status === 200 && blockedRead.json?.findings?.length === 1
+      && deleteOther.status === 404 && deleteMine.status === 204 && (await getFinding(DKL)).json?.findings?.length === 0,
+    [otherFindings, dataOwner, findingsBlocked, blockedRead, deleteOther, deleteMine].map((r) => r.status).join());
+  check("LIM-2526: derived findings, choices and deletion add no product analytics rows",
+    withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id=?").get(AK).n) === eventsBeforeResults);
+  const retention = await import(pathToFileURL(path.join(ROOT, "lib/v2/retention-core.mts")).href);
+  await resultConsent(true);
+  const priorConsentRetry = await sendFinding(finding);
+  await sleep(5);
+  const freshFinding = { ...finding, id: "d".repeat(32), turn_started_at: new Date().toISOString() };
+  const freshWrite = await sendFinding(freshFinding);
+  check("LIM-2526: turning consent off and on cannot authorize a turn from the earlier consent period",
+    priorConsentRetry.status === 403 && freshWrite.status === 200, `${priorConsentRetry.text} ${freshWrite.text}`);
+  const oldResult = new Date(Date.now() - 31 * 86_400_000).toISOString();
+  withDb((d) => d.prepare("UPDATE v2_analysis_findings SET received_at = ? WHERE id = ?").run(oldResult, freshFinding.id));
+  const expiredRetry = await sendFinding(freshFinding);
+  const expiredFindings = await getFinding(DKL);
+  const retentionFile = path.join(onDir, "analysis-retention.sqlite");
+  withDb((d) => d.prepare("VACUUM INTO ?").run(retentionFile));
+  const retentionDb = new DatabaseSync(retentionFile);
+  let removedFinding;
+  try {
+    retentionDb.exec("PRAGMA foreign_keys = ON");
+    const sql = {
+      get: (q, ...args) => retentionDb.prepare(q).get(...args),
+      all: (q, ...args) => retentionDb.prepare(q).all(...args),
+      run: (q, ...args) => Number(retentionDb.prepare(q).run(...args).changes),
+    };
+    await retention.runRetention(sql, (fn) => fn(), new Date(), { secret: "test-only" });
+    removedFinding = retentionDb.prepare("SELECT 1 FROM v2_analysis_findings WHERE id = ?").get(freshFinding.id);
+  } finally {
+    retentionDb.close();
+    rmSync(retentionFile, { force: true });
+  }
+  await call(DKL.who, "DELETE", resultsUrl, { bearer: DKL.access });
+  await resultConsent(false);
+  check("LIM-2526: derived findings are unavailable at 30 days and removed by retention",
+    expiredRetry.status === 410 && expiredFindings.status === 200 && expiredFindings.json?.findings?.length === 0 && !removedFinding,
+    `${expiredRetry.text} ${expiredFindings.text}`);
+  const pendingDeletion = await kShare(DKL, "claude-code", "repeat-analysis-deletion", 4, [[GW.id, 4]], []);
+  const deletionPath = `/api/v2/workspaces/${AK}/sessions/${pendingDeletion.key}/analysis`;
+  const attemptDeletion = (dev, before) => call(dev.who, "DELETE", `${deletionPath}?before=${encodeURIComponent(before)}`, { bearer: dev.access });
+  const mark = new Date().toISOString();
+  const beforeAudit = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id=? AND action='data_sharing.results_deleted'").get(AK).n);
+  const firstDelete = await attemptDeletion(DKL, mark);
+  const repeatedDelete = await attemptDeletion(DKL, mark);
+  const storedCutoff = withDb((d) => d.prepare("SELECT analysis_deleted_at FROM v2_sessions WHERE ws_id=? AND session_key=?").get(AK, pendingDeletion.key)?.analysis_deleted_at);
+  const afterAudit = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id=? AND action='data_sharing.results_deleted'").get(AK).n);
+  const deleteHistory = await ka(KL, "DELETE", `/sessions/${pendingDeletion.key}`);
+  const acknowledgedByReplacement = await attemptDeletion(secondPairing, mark);
+  const deniedByOther = await attemptDeletion(DKM, mark);
+  check("LIM-2526: the same deletion keeps its cutoff, audits an empty deletion once, and a replacement pairing can settle it",
+    firstDelete.status === 204 && repeatedDelete.status === 204 && storedCutoff === mark && afterAudit === beforeAudit + 1
+      && deleteHistory.status === 204 && acknowledgedByReplacement.status === 204 && deniedByOther.status === 404,
+    [firstDelete, repeatedDelete, deleteHistory, acknowledgedByReplacement, deniedByOther].map((r) => r.status).join(" "));
+  const expiredTurn = { ...finding, id: "e".repeat(32), turn_started_at: oldResult };
+  await resultConsent(true);
+  const oldTurn = await sendFinding(expiredTurn);
+  await resultConsent(false);
+  check("LIM-2526: an expired turn stays refused when its finding row is absent", oldTurn.status === 410, oldTurn.text);
+  {
+    // A deliberate share is private to the named people even when the caller owns the workspace.
+    const excerptUrl = `/api/v2/workspaces/${AK}/sessions/${kSA.key}/excerpts`;
+    const modelBase = `/api/v2/workspaces/${AK}/sessions/${kSA.key}/model-check`;
+    const modelUrl = `${modelBase}?epoch=${kSA.epoch}&phase=dispatch`;
+    const modelAnswer = (revision) => excerptDevice("POST", `${modelBase}?epoch=${kSA.epoch}&phase=answer&revision=${revision}`);
+    const excerptList = `/api/v2/workspaces/${AK}/excerpts`;
+    const exId = () => `ex_${randomBytes(16).toString("hex")}`;
+    const excerpt = {
+      id: exId(), text: `EXCERPT-CONTENT-CANARY-<b>${"z".repeat(3900)}</b>\nEXCERPT-OVERFLOW-CANARY\n`,
+      purpose: "Review the invoice decision", readers: [KM.id, KV.id], hours: 2,
+    };
+    const excerptDevice = (method, url, body, dev = DKL, revision = consentRevision) =>
+      call(dev.who, method, url, { bearer: dev.access, body, headers: method === "POST" && url.endsWith("/excerpts") ? { "if-match": `"${revision}"` } : {} });
+    const excerptWeb = (u, method, id) =>
+      call(u.who, method, id ? `${excerptList}/${id}` : excerptList, { cookie: u.cookie });
+    let consentRevision = 0;
+    const excerptConsent = (enabled, revision = ++consentRevision, dev = DKL) =>
+      excerptDevice("PUT", "/api/v2/devices/self/data-sharing", { tier: 4, enabled, revision }, dev);
+    const noExcerptConsent = await excerptDevice("POST", excerptUrl, excerpt);
+    const sharingUrl = `/api/v2/workspaces/${AK}/data-sharing`;
+    const modelBlock = (user, model_check_blocked) => call(user.who, "PATCH", sharingUrl, {
+      cookie: user.cookie, body: { model_check_blocked },
+    });
+    const configured = await call(KO.who, "PATCH", sharingUrl, {
+      cookie: KO.cookie, body: { decision_service_url: "https://decision.example.test/v1/systemone" },
+    });
+    const deniedModelBlock = await modelBlock(KM, true);
+    const hiddenModel = await excerptDevice("POST", modelUrl, undefined, DKM);
+    const modelAllowed = await excerptDevice("POST", modelUrl);
+    const grantUntil = (capability) => withDb((d) => d.prepare(
+      "SELECT until_ms FROM v2_model_send_windows WHERE ws_id = ? AND capability = ?",
+    ).get(AK, capability)?.until_ms);
+    const checkUntil = grantUntil("limit_check");
+    const veto = await modelBlock(KO, true);
+    const finishedAfterGrant = !!checkUntil && Date.now() >= checkUntil;
+    const modelBlocked = await excerptDevice("POST", modelUrl);
+    const suggestionBase = `${sharingUrl}?for=model-suggestion&recipient=workspace`;
+    const suggestionUrl = suggestionBase + "&phase=dispatch";
+    const suggestionAnswer = (revision) => excerptDevice("GET", `${suggestionBase}&phase=answer&revision=${revision}`);
+    const suggestionAllowed = await excerptDevice("GET", suggestionUrl);
+    const acceptedBeforeVeto = await suggestionAnswer(suggestionAllowed.json?.revision);
+
+    await modelBlock(KO, false);
+    const suggestionUntil = grantUntil("suggestion");
+    const suggestionVeto = await restrictSharing(KO, AK, 3, true);
+    const suggestionFinishedAfterGrant = !!suggestionUntil && Date.now() >= suggestionUntil;
+    const suggestionBlocked = await excerptDevice("GET", suggestionUrl);
+    const modelStillAllowed = await excerptDevice("POST", modelUrl);
+    await restrictSharing(KO, AK, 3, false);
+
+    check("LIM-2528: model policy reads belong to the sharing device and honor its own owner-set block",
+      modelAllowed.json?.enabled === true && modelAllowed.json?.send_for_ms === 750
+        && modelAllowed.json?.decision_service?.revision === configured.json?.decision_service?.revision
+        && modelBlocked.json?.enabled === false && hiddenModel.status === 404 && deniedModelBlock.status === 403,
+      [modelAllowed, modelBlocked, hiddenModel, deniedModelBlock].map((r) => r.status).join());
+    check("LIM-2528: a model check veto save waits out a previously granted send window",
+      veto.json?.model_check_blocked === true && finishedAfterGrant);
+    check("LIM-2528: a suggestion veto save waits out its window and both blocks are independent",
+      suggestionAllowed.json?.enabled === true && suggestionVeto.json?.blocked?.includes(3) && suggestionFinishedAfterGrant
+        && suggestionBlocked.json?.enabled === false && modelStillAllowed.json?.enabled === true);
+
+    const previousAnswers = await Promise.all([modelAnswer(modelAllowed.json?.revision), suggestionAnswer(suggestionAllowed.json?.revision)]);
+    const preReviewClients = await Promise.all([excerptDevice("POST", modelBase), excerptDevice("GET", `${sharingUrl}?for=model-suggestion`)]);
+    check("Saved blocks discard both outstanding answers even after the workspace unblocks",
+      acceptedBeforeVeto.json?.enabled === true && previousAnswers.every((answer) => answer.json?.enabled === false),
+      previousAnswers.map((answer) => answer.text).join(" "));
+    check("Decision grants require clients that check authorization again after the answer",
+      preReviewClients.every((answer) => answer.json?.enabled === false));
+
+    const authorizedTeam = (await ka(KO, "POST", "/teams", { name: "Decision scope" })).json?.id;
+    await ka(KO, "POST", `/teams/${authorizedTeam}/members`, { user_id: KL.id, role: "member" });
+    await ka(KO, "POST", `/teams/${authorizedTeam}/members`, { user_id: KM.id, role: "member" });
+    const teamGoal = (await ka(KM, "POST", "/goals", { title: "Private decision goal", visibility: "team", team_id: authorizedTeam })).json;
+    const memberGrant = await excerptDevice("GET", suggestionUrl);
+    const teamDispatchUntil = grantUntil("suggestion");
+    const removedTeamMember = await ka(KO, "DELETE", `/teams/${authorizedTeam}/members/${KL.id}`);
+    const finishedAfterTeamGrant = !!teamDispatchUntil && Date.now() >= teamDispatchUntil;
+    const afterRemoval = await excerptDevice("GET", suggestionUrl);
+    const afterTeamAnswer = await suggestionAnswer(memberGrant.json?.revision);
+    check("The dispatch list follows team access and a saved removal invalidates old grants",
+      memberGrant.json?.goals?.some(({ id, title }) => id === teamGoal.id && title === teamGoal.title)
+      && removedTeamMember.status === 204 && finishedAfterTeamGrant && afterRemoval.json?.enabled === true
+      && !afterRemoval.json?.goals?.some(({ id }) => id === teamGoal.id) && afterTeamAnswer.json?.enabled === false,
+      [memberGrant, removedTeamMember, afterRemoval, afterTeamAnswer].map((r) => r.status).join(" "));
+    // Let this last dispatch window end before later fixture updates.
+    await sleep(Math.max(0, grantUntil("suggestion") - Date.now() + 10));
+
+    const olderRevision = ++consentRevision;
+    const off = await excerptConsent(false);
+    const staleOn = await excerptConsent(true, olderRevision);
+    check("LIM-2528: a tier 4 request arriving out of order cannot undo a newer opt-out",
+      off.status === 200 && off.json?.revision === consentRevision && staleOn.status === 200 && staleOn.json?.enabled === false
+        && (await excerptDevice("GET", excerptUrl)).json?.enabled === false, `${off.text} ${staleOn.text}`);
+    await excerptConsent(true);
+    const roster = await excerptDevice("GET", excerptUrl);
+    const hiddenRoster = await excerptDevice("GET", excerptUrl, undefined, DKM);
+    const staleExcerptConsent = await excerptDevice("POST", excerptUrl, excerpt, DKL, olderRevision);
+    check("An excerpt upload under an earlier consent revision is refused",
+      staleExcerptConsent.status === 409 && staleExcerptConsent.json?.error === "excerpt_preview_expired", staleExcerptConsent.text);
+    const foreignReader = await excerptDevice("POST", excerptUrl, { ...excerpt, readers: [U1.id] });
+    const invalidExpiry = await excerptDevice("POST", excerptUrl, { ...excerpt, hours: 0 });
+    const invalidPurpose = await excerptDevice("POST", excerptUrl, { ...excerpt, purpose: "" });
+    const extraField = await excerptDevice("POST", excerptUrl, { ...excerpt, transcript: "RAW-CANARY" });
+    await restrictSharing(KO, AK, 4, true);
+    const blockedExcerpt = await excerptDevice("POST", excerptUrl, excerpt);
+    await restrictSharing(KO, AK, 4, false);
+    check("LIM-2528: excerpt upload independently checks consent, workspace veto, named members and closed fields",
+      noExcerptConsent.status === 403 && blockedExcerpt.status === 403 && hiddenRoster.status === 404
+        && foreignReader.status === 404 && invalidExpiry.status === 400 && /expiry/i.test(invalidExpiry.json?.message)
+        && invalidPurpose.status === 400 && /purpose/i.test(invalidPurpose.json?.message) && extraField.status === 400
+        && roster.json?.readers?.some((r) => r.id === KV.id),
+      [noExcerptConsent, blockedExcerpt, hiddenRoster, foreignReader, invalidExpiry, invalidPurpose, extraField].map((r) => r.status).join());
+
+    const excerptGrant = await excerptDevice("GET", excerptUrl + "?phase=dispatch");
+    const excerptUntil = grantUntil("excerpt");
+    const excerptVeto = await restrictSharing(KO, AK, 4, true);
+    const clearedDispatch = await excerptDevice("GET", excerptUrl + "?phase=dispatch");
+    check("A saved excerpt block outlasts its dispatch grants and refuses new ones",
+      excerptGrant.json?.send_for_ms === 750 && !!excerptUntil && Date.now() >= excerptUntil
+      && excerptVeto.json?.blocked?.includes(4) && clearedDispatch.json?.enabled === false);
+    await restrictSharing(KO, AK, 4, false);
+
+    const roleGrant = await excerptDevice("POST", modelUrl);
+    const roleUntil = grantUntil("limit_check");
+    const demotion = await ka(KO, "POST", `/members/${KL.id}`, { role: "viewer" });
+    const roleWaited = Date.now() >= roleUntil;
+    const deniedGrant = await excerptDevice("POST", modelUrl);
+    await ka(KO, "POST", `/members/${KL.id}`, { role: "member" });
+    const answerUrl = (url, revision) => url.replace("phase=dispatch", "phase=answer") + `&revision=${revision}`;
+    const deniedRoleAnswer = await excerptDevice("POST", answerUrl(modelUrl, roleGrant.json?.revision));
+    check("LIM-2528: a role change waits for the dispatch boundary and invalidates the earlier answer",
+      roleGrant.json?.enabled === true && demotion.status === 200 && roleWaited && deniedGrant.status === 403
+        && deniedRoleAnswer.json?.enabled === false, [demotion, deniedGrant, deniedRoleAnswer].map((r) => r.status).join(" "));
+    const stopping = await kShare(DKL, "claude-code", "model-stop-dispatch", 4, [[GW.id, 4]], []);
+    const stopUrl = `/api/v2/workspaces/${AK}/sessions/${stopping.key}/model-check?epoch=${stopping.epoch}&phase=dispatch`;
+    const stopGrant = await excerptDevice("POST", stopUrl);
+    const stopUntil = grantUntil("limit_check");
+    const stopped = await ka(KL, "POST", `/sessions/${stopping.key}/stop-sharing`);
+    const stoppedWaited = Date.now() >= stopUntil;
+    const deniedStopAnswer = await excerptDevice("POST", answerUrl(stopUrl, stopGrant.json?.revision));
+    check("LIM-2528: a session stop waits for an outstanding dispatch window and invalidates its answer",
+      stopGrant.json?.enabled === true && stopped.status === 200 && stoppedWaited && deniedStopAnswer.json?.enabled === false,
+      [stopped, deniedStopAnswer].map((r) => r.status).join(" "));
+    withDb((d) => d.prepare("DELETE FROM v2_sessions WHERE ws_id=? AND session_key=?").run(AK, stopping.key));
+    const uploaded = await excerptDevice("POST", excerptUrl, excerpt);
+    const retry = await excerptDevice("POST", excerptUrl, excerpt);
+    const editedRetry = await excerptDevice("POST", excerptUrl, { ...excerpt, purpose: "Different purpose" });
+    const sharerExcerpt = await excerptWeb(KL, "GET", excerpt.id);
+    const namedExcerpt = await excerptWeb(KM, "GET", excerpt.id);
+    const decisionBeforeChange = await excerptDevice("POST", modelUrl);
+    const expectedSaveAfter = grantUntil("limit_check");
+    const replacement = { decision_service_url: "https://changed-decision.example.test/" };
+    const changeAddress = () => call(KO.who, "PATCH", sharingUrl, { cookie: KO.cookie, body: replacement })
+      .then((r) => ({ status: r.status, endedAt: Date.now() }));
+    const repeatedSaves = await Promise.all([changeAddress(), changeAddress()]);
+    const answerAfterChange = await excerptDevice("POST", modelUrl.replace("phase=dispatch", "phase=answer")
+      + `&revision=${decisionBeforeChange.json?.revision}`);
+    check("LIM-2528: repeated identical recipient saves both wait for the active grant and invalidate its answer",
+      repeatedSaves.every(({ status, endedAt }) => status === 200 && endedAt >= expectedSaveAfter)
+        && answerAfterChange.json?.enabled === false, JSON.stringify(repeatedSaves));
+    const viewerExcerpt = await excerptWeb(KV, "GET", excerpt.id);
+    const ownerExcerpt = await excerptWeb(KO, "GET", excerpt.id);
+    const ownerExcerptList = await excerptWeb(KO, "GET");
+    const namedExcerptList = await excerptWeb(KV, "GET");
+    const deviceExcerpt = await excerptDevice("GET", `${excerptList}/${excerpt.id}`);
+    const namedRevoke = await excerptWeb(KM, "DELETE", excerpt.id);
+    const ownerRevoke = await excerptWeb(KO, "DELETE", excerpt.id);
+    check("LIM-2528: only the sharer and named members or viewers can read exact uncached text, and only the sharer can revoke",
+      uploaded.status === 200 && !uploaded.json?.text && retry.json?.expires_at === uploaded.json?.expires_at && editedRetry.status === 409
+        && sharerExcerpt.json?.text === excerpt.text && sharerExcerpt.json?.can_revoke === true
+        && namedExcerpt.json?.text === excerpt.text && namedExcerpt.headers.get("cache-control") === "private, no-store"
+        && viewerExcerpt.json?.text === excerpt.text && !viewerExcerpt.json?.can_revoke && namedExcerptList.json?.excerpts?.[0]?.purpose === excerpt.purpose
+        && !namedExcerptList.text.includes("EXCERPT-CONTENT-CANARY") && ownerExcerpt.status === 404
+        && ownerExcerptList.json?.excerpts?.length === 0 && deviceExcerpt.status === 403 && namedRevoke.status === 404 && ownerRevoke.status === 404,
+      [uploaded, retry, editedRetry, sharerExcerpt, namedExcerpt, viewerExcerpt, ownerExcerpt, namedRevoke, ownerRevoke].map((r) => r.status).join());
+    const expires = { ...excerpt, id: exId(), hours: 1, purpose: "Access expiry case", text: "ACCESS-EXPIRY-CANARY" };
+    const scheduled = { ...excerpt, id: exId(), hours: 1, purpose: "Scheduled expiry case", text: "SCHEDULED-EXPIRY-CANARY" };
+    await excerptDevice("POST", excerptUrl, expires);
+    await excerptDevice("POST", excerptUrl, scheduled);
+    await excerptConsent(false);
+    const inLiveFiles = (file, passage) => [file, `${file}-wal`].some((f) => existsSync(f) && readFileSync(f).includes(passage));
+    withDb((d) => d.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get());
+    const revokeCanaries = ["EXCERPT-CONTENT-CANARY", "EXCERPT-OVERFLOW-CANARY"];
+    const beforeRevoke = revokeCanaries.every((canary) => inLiveFiles(dbFile, canary));
+    let revoked;
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        await page.setCookie(...KV.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await page.setViewport({ width: 390, height: 844 });
+        await page.goto(`${BASE}/app/w/${AK}/sessions/excerpts`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => [...document.querySelectorAll("button")].filter((b) => b.textContent === "Read excerpt").length === 3);
+        await page.evaluate((purpose) => [...document.querySelectorAll("li")].find((li) => li.innerText.includes(purpose))
+          .querySelector("button").click(), excerpt.purpose);
+        await page.waitForFunction(() => document.body.innerText.includes("EXCERPT-CONTENT-CANARY"));
+        const render = await page.evaluate(() => ({
+          width: document.scrollingElement.scrollWidth,
+          code: document.body.innerText.includes("<b>"),
+          mayRevoke: [...document.querySelectorAll("button")].some((b) => b.textContent === "Revoke access"),
+        }));
+        check("LIM-2528 (Chrome 390px): named reader opens wrapped plain text without a revoke control",
+          render.width <= 390 && render.code && !render.mayRevoke, JSON.stringify(render));
+        const clickExcerpt = (label) => page.evaluate((purpose, name) => {
+          const row = [...document.querySelectorAll("li")].find((li) => li.innerText.includes(purpose));
+          [...(row?.querySelectorAll("button") ?? [])].find((button) => button.textContent === name)?.click();
+        }, excerpt.purpose, label);
+        await clickExcerpt("Close excerpt");
+        revoked = await excerptWeb(KL, "DELETE", excerpt.id);
+        await clickExcerpt("Read excerpt");
+        const accessEnded = await page.waitForFunction(() => document.body.innerText.includes("Access to this excerpt ended."), { timeout: 3000 }).then(() => true, () => false);
+        const stale = await page.evaluate(() => ({
+          text: document.body.innerText.includes("EXCERPT-CONTENT-CANARY"),
+          width: document.scrollingElement.scrollWidth,
+          readButtons: [...document.querySelectorAll("button")].filter((b) => b.textContent === "Read excerpt").length,
+        }));
+        check("LIM-2528 (Chrome 390px): a stale listing and its text disappear when access has ended",
+          accessEnded && !stale.text && stale.width <= 390 && stale.readButtons === 2, JSON.stringify(stale));
+      } catch (e) {
+        check("LIM-2528 (Chrome 390px): excerpt page loads for the named reader", false, e.stack);
+      } finally {
+        await browser.close();
+      }
+    } else check("LIM-2528: Chrome is available for the excerpt page", false, CHROME);
+
+    revoked ??= await excerptWeb(KL, "DELETE", excerpt.id);
+    check("LIM-2528: revocation scrubs excerpt plaintext from database and WAL",
+      beforeRevoke && revokeCanaries.every((canary) => !inLiveFiles(dbFile, canary)));
+    const revokedRead = await excerptWeb(KV, "GET", excerpt.id);
+    await excerptConsent(true);
+    const noResurrection = await excerptDevice("POST", excerptUrl, excerpt);
+    const past = new Date(Date.now() - 1_000).toISOString();
+    withDb((d) => d.prepare("UPDATE v2_session_excerpts SET expires_at = ? WHERE id = ?").run(past, expires.id));
+    const beforeExpiry = inLiveFiles(dbFile, expires.text);
+    const expiredRead = await excerptWeb(KV, "GET", expires.id);
+    check("LIM-2528: access-time expiry scrubs excerpt plaintext from database and WAL",
+      beforeExpiry && !inLiveFiles(dbFile, expires.text));
+    const snapshot = withDb((d) => ({
+      excerpts: d.prepare("SELECT id FROM v2_session_excerpts WHERE id IN (?, ?)").all(excerpt.id, expires.id),
+      grants: d.prepare("SELECT * FROM v2_excerpt_readers WHERE excerpt_id IN (?, ?)").all(excerpt.id, expires.id),
+      audits: d.prepare("SELECT action FROM v2_audit WHERE ws_id = ? AND object_id IN (?, ?) ORDER BY seq").all(AK, excerpt.id, expires.id).map((row) => row.action),
+      events: d.prepare("SELECT actor, props FROM v2_events WHERE ws_id = ? AND name = 'session_excerpt_shared'").all(AK),
+    }));
+    check("LIM-2528: revoke works with uploads off, expiry removes stored text and readers, and the event carries no content",
+      revoked.status === 204 && revokedRead.status === 404 && noResurrection.status === 404 && expiredRead.status === 404
+        && !snapshot.excerpts.length && !snapshot.grants.length && snapshot.events.length === 3 && snapshot.events.every((row) => row.props === "{}")
+        && snapshot.events.every((row) => row.actor === eventActor(readFileSync(path.join(onDir, ".secret"), "utf8").trim(), KL.id))
+        && snapshot.audits.join() === "session_excerpt.shared,session_excerpt.shared,session_excerpt.revoked,session_excerpt.expired",
+      JSON.stringify(snapshot));
+
+    const archive = path.join(tmpRoot, "excerpt-retention");
+    const excerptRetentionFile = path.join(archive, "v2", "align.sqlite");
+    mkdirSync(path.dirname(excerptRetentionFile), { recursive: true });
+    const auditTargets = [excerpt.id, expires.id];
+    const longAgo = new Date(Date.now() - 400 * 86_400_000).toISOString();
+    withDb((d) => {
+      d.prepare("UPDATE v2_audit SET at = ? WHERE object_id IN (?, ?)").run(longAgo, ...auditTargets);
+      d.prepare("VACUUM INTO ?").run(excerptRetentionFile);
+    });
+    const liveArchive = new DatabaseSync(excerptRetentionFile);
+    liveArchive.exec("PRAGMA journal_mode = WAL");
+    const beforeScheduledExpiry = inLiveFiles(excerptRetentionFile, scheduled.text);
+    const afterExpiry = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const scheduledRun = admin(["retention", "run"], { ALIGN_DATA_DIR: archive, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: afterExpiry });
+    const scheduledCounts = scheduledRun.status === 0 ? JSON.parse(scheduledRun.out.trim().split("\n").at(-1)) : {};
+    const excerptRetentionDb = new DatabaseSync(excerptRetentionFile);
+    try {
+      check("LIM-2528: the scheduled retention pass scrubs expired plaintext and removes grants while keeping a content-free audit",
+        scheduledRun.status === 0 && scheduledCounts.session_excerpts_deleted === 1 && beforeScheduledExpiry && !inLiveFiles(excerptRetentionFile, scheduled.text)
+          && !excerptRetentionDb.prepare("SELECT 1 FROM v2_session_excerpts WHERE id = ?").get(scheduled.id)
+          && !excerptRetentionDb.prepare("SELECT 1 FROM v2_excerpt_readers WHERE excerpt_id = ?").get(scheduled.id)
+          && !!excerptRetentionDb.prepare("SELECT 1 FROM v2_audit WHERE object_id = ? AND action = 'session_excerpt.expired'").get(scheduled.id),
+        scheduledRun.err);
+      const auditGone = !excerptRetentionDb.prepare("SELECT 1 FROM v2_audit WHERE object_id IN (?, ?)").get(...auditTargets);
+      // Match just these two shares to the archived database after its real retention pass.
+      if (auditGone) withDb((d) => d.prepare("DELETE FROM v2_audit WHERE object_id IN (?, ?)").run(...auditTargets));
+      const responses = await Promise.all([excerpt, expires].map((share) => excerptDevice("POST", excerptUrl, share)));
+      check("LIM-2528: revoked and expired share ids remain unavailable after audit pruning",
+        auditGone && responses.every((r) => r.status === 404)
+          && (await excerptWeb(KV, "GET", expires.id)).status === 404 && (await excerptWeb(KV, "GET", excerpt.id)).status === 404,
+        responses.map((r) => r.status).join());
+    } finally {
+      excerptRetentionDb.close();
+      liveArchive.close();
+    }
+    await excerptWeb(KL, "DELETE", scheduled.id);
+
+    const rejoinWs = (await call(KO.who, "POST", "/api/v2/workspaces", {
+      cookie: KO.cookie, body: { name: "Excerpt rejoin" },
+    })).json?.id;
+    const rejoinBase = `/api/v2/workspaces/${rejoinWs}`;
+    const rejoinWeb = (person, method, route, body) => call(person.who, method, `${rejoinBase}${route}`, { cookie: person.cookie, body });
+    const invite = async (person) => {
+      const i = await rejoinWeb(KO, "POST", "/invites", { email: person.email, role: "member" });
+      return call(person.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: person.cookie, body: {} });
+    };
+    const reader = await signUp("XR", "Excerpt reader", "rejoin-reader@example.test");
+    const sharer = await signUp("XS", "Excerpt sharer", "rejoin-sharer@example.test");
+    await invite(reader);
+    await invite(sharer);
+    const dev = kDevice(sharer, rejoinWs);
+    const session = await kShare(dev, "claude-code", "excerpt-rejoin", 1, [], [], rejoinWs);
+    const rejoinUrl = `${rejoinBase}/sessions/${session.key}/excerpts`;
+    const rejoinShare = { ...excerpt, id: exId(), text: "REJOIN-EXCERPT-CANARY", readers: [reader.id], hours: 1 };
+    const shareForDeletion = { ...rejoinShare, id: exId(), text: " ", purpose: "📌".repeat(81) };
+    const rejoinRead = (person) => rejoinWeb(person, "GET", `/excerpts/${rejoinShare.id}`);
+    const pairedConsent = await excerptConsent(true, 1, dev);
+    const created = await excerptDevice("POST", rejoinUrl, rejoinShare, dev, pairedConsent.json?.revision);
+    const active = await rejoinRead(reader);
+    const readableBlank = await excerptDevice("POST", rejoinUrl, shareForDeletion, dev, pairedConsent.json?.revision);
+    const blankRead = await rejoinWeb(reader, "GET", `/excerpts/${shareForDeletion.id}`);
+    const blankRevoke = await rejoinWeb(sharer, "DELETE", `/excerpts/${shareForDeletion.id}`);
+    const staleRevoke = await rejoinWeb(sharer, "DELETE", `/excerpts/${shareForDeletion.id}`);
+    check("LIM-2528: a space and a multibyte purpose fit the written limits and a stale revoke remains unavailable",
+      readableBlank.status === 200 && blankRead.json?.text === " " && blankRead.json?.purpose === shareForDeletion.purpose
+        && blankRevoke.status === 204 && staleRevoke.status === 404,
+      [readableBlank, blankRead, blankRevoke, staleRevoke].map((r) => r.status).join(" "));
+    const ending = await kShare(dev, "claude-code", "excerpt-stop-delete", 1, [], [], rejoinWs);
+    const endingUrl = `${rejoinBase}/sessions/${ending.key}/excerpts`;
+    const afterStop = { ...rejoinShare, id: exId(), text: "EXCERPT-STOP-TEST" };
+    const afterHistory = { ...rejoinShare, id: exId(), text: "EXCERPT-DELETE-TEST" };
+    const endingShare = (body) => excerptDevice("POST", endingUrl, body, dev, pairedConsent.json?.revision);
+    const endingOne = await endingShare(afterStop);
+    const endingTwo = await endingShare(afterHistory);
+    const endedShare = await rejoinWeb(sharer, "POST", `/sessions/${ending.key}/stop-sharing`, {});
+    const revokedAfterStop = await rejoinWeb(sharer, "DELETE", `/excerpts/${afterStop.id}`);
+    const removedHistory = await rejoinWeb(sharer, "DELETE", `/sessions/${ending.key}`);
+    const absentAfterHistory = await rejoinWeb(reader, "GET", `/excerpts/${afterHistory.id}`);
+    check("LIM-2528: a stopped session's excerpt remains revocable and session deletion removes remaining text",
+      [endingOne, endingTwo, endedShare].every((response) => response.status === 200) && revokedAfterStop.status === 204
+        && removedHistory.status === 204 && absentAfterHistory.status === 404 && !inLiveFiles(dbFile, afterHistory.text),
+      [endingOne, endingTwo, endedShare, revokedAfterStop, removedHistory, absentAfterHistory].map((r) => r.status).join(" "));
+
+
+    const removedReader = await rejoinWeb(KO, "DELETE", `/members/${reader.id}`);
+    const rejoinedReader = await invite(reader);
+    const readAfterRejoin = await rejoinRead(reader);
+    const sharerStillHas = await rejoinRead(sharer);
+    const removedSharer = await rejoinWeb(KO, "DELETE", `/members/${sharer.id}`);
+    const rejoinedSharer = await invite(sharer);
+    const afterSharerRejoins = await rejoinRead(sharer);
+    check("LIM-2528: a removed reader or sharer regains no access on rejoin, and removal of the sharer scrubs the passage",
+      created.status === 200 && active.status === 200 && removedReader.status === 204 && rejoinedReader.status === 200
+      && readAfterRejoin.status === 404 && sharerStillHas.status === 200 && removedSharer.status === 204
+      && rejoinedSharer.status === 200 && afterSharerRejoins.status === 404 && !inLiveFiles(dbFile, rejoinShare.text),
+      [created, active, removedReader, rejoinedReader, readAfterRejoin, sharerStillHas, removedSharer, rejoinedSharer, afterSharerRejoins].map((r) => r.status).join());
+    const pinnedShare = { ...excerpt, id: exId(), text: "PINNED-WAL-CANARY" };
+    await excerptDevice("POST", excerptUrl, pinnedShare);
+    const pin = new DatabaseSync(dbFile, { readOnly: true });
+    try {
+      pin.exec("BEGIN");
+      pin.prepare("SELECT text FROM v2_session_excerpts WHERE id = ?").get(pinnedShare.id);
+      const removed = await excerptWeb(KL, "DELETE", pinnedShare.id);
+      check("LIM-2528: revocation denies fresh reads even while a connection pins the old database log",
+        removed.status === 204 && (await excerptWeb(KV, "GET", pinnedShare.id)).status === 404
+        && inLiveFiles(dbFile, pinnedShare.text));
+    } finally {
+      pin.close();
+    }
+    const checkBy = Date.now() + 3500;
+    while (inLiveFiles(dbFile, pinnedShare.text) && Date.now() < checkBy) await new Promise((resolve) => setTimeout(resolve, 100));
+    check("LIM-2528: a blocked log cleanup retries and removes plaintext when the reader releases it",
+      !inLiveFiles(dbFile, pinnedShare.text));
+    await excerptConsent(false);
+  }
+  const anchorGoal = (await ka(KL, "POST", "/goals", { title: "Use literal folder names", team_id: TP, limits: [{
+    type: "must_not", text: "Rewrite historical entries.", path_anchors: ["données (archives)/**"],
+  }] })).json;
+  check("LIM-2526: legitimate non-ASCII repo-relative anchors round trip",
+    anchorGoal?.limits?.[0]?.path_anchors?.join() === "données (archives)/**", JSON.stringify(anchorGoal));
+  const invalidAnchor = await ka(KL, "POST", `/goals/${GW.id}/versions`, {
+    limits: [{ ...GW.limits[0], path_anchors: ["/private"] }],
+  });
+  check("LIM-2526: limit examples and repo-relative anchors survive a read and invalid paths name the field people see",
+    GW.limits[0].path_anchors?.join() === "services/billing/**" && GW.limits[0].example_crossing === "I will alter the invoice route."
+      && GW.limits[0].example_within === "I will leave the invoice route alone."
+      && invalidAnchor.status === 400 && invalidAnchor.json?.message?.includes("File path anchors"),
+    invalidAnchor.text);
   const sig = await call("KL", "POST", `/api/v2/workspaces/${AK}/activity`, {
     bearer: DKL.access,
     body: {
@@ -13352,11 +14175,42 @@ try {
         await click("[role=dialog] button", "Approve and launch");
         await page.waitForSelector('[role=dialog] [data-foresight="approve_and_launch"][aria-busy="false"]');
         const drawerFieldsOkay = await fill('[role=dialog] [data-expectation-fields]', "No failed checks", secondDue, "");
-        await click("[role=dialog] button", "Confirm: Approve and launch");
-        await page.waitForSelector("[role=dialog] [data-expectation-record]");
+        await page.setViewport({ width: 390, height: 600 });
+        const confirmButton = '[role=dialog] [data-confirm="approve_and_launch"] > div:last-child > button:first-child';
+        const confirmLaunch = page.locator(confirmButton).setTimeout(15000);
+        const confirmation = await confirmLaunch.waitHandle();
+        await confirmation.scrollIntoView();
+        const fitsShortDrawer = await confirmation.evaluate((button) => {
+          const rect = button.getBoundingClientRect();
+          return button.textContent.trim() === "Confirm: Approve and launch" &&
+            rect.top >= 0 && rect.bottom <= innerHeight && rect.height >= 44 &&
+            button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)) &&
+            document.scrollingElement.scrollWidth <= innerWidth;
+        });
+        check("expectations: on a short phone the expanded drawer scrolls to the confirmation",
+          fitsShortDrawer, await confirmation.evaluate((e) => JSON.stringify(e.getBoundingClientRect())));
+        const responses = [];
+        const drawerResponse = (response) => {
+          if (response.url().startsWith(BASE + w + secondPath)) {
+            responses.push({ method: response.request().method(), url: response.url(), status: response.status(),
+              body: response.request().postData() });
+          }
+        };
+        page.on("response", drawerResponse);
+        try {
+          await confirmLaunch.click();
+          await page.waitForSelector("[role=dialog] [data-expectation-record]");
+        } catch (e) {
+          throw new Error(`Drawer launch: ${e.message} ${JSON.stringify({ responses, errors,
+            drawer: await page.$eval("[role=dialog]", (d) => d.innerText).catch(() => null) })}`, { cause: e });
+        } finally {
+          page.off("response", drawerResponse);
+        }
+        await page.setViewport({ width: 390, height: 844 });
         const secondRead = (await get(owner, secondPath)).json;
         check("expectations: the Requests drawer approves and launches with an expectation at the 366-day boundary",
-          drawerFieldsOkay && secondRead?.launch === "launched" && secondRead.expectation?.due_on === secondDue && secondRead.expectation?.assignee.id === lead.id &&
+          drawerFieldsOkay && secondRead?.launch === "launched" && secondRead.expectation?.due_on === secondDue &&
+          secondRead.expectation?.expected === "No failed checks" && secondRead.expectation?.assignee.id === lead.id &&
           counts() === 2 && !(await get(lead, "/home")).json.outcomes.waiting_on_me.length, JSON.stringify({ drawerFieldsOkay, secondRead }));
 
         const bad = [];
@@ -13554,6 +14408,11 @@ try {
       goal_version, value, exit_status, run_id: randomUUID(),
     });
     const W = (await call(owner.who, "POST", "/api/v2/workspaces", { cookie: owner.cookie, body: { name: "Reading sources" } })).json.id;
+    const blockedSignals = await restrictSharing(owner, W, 1, true);
+    const blockedResults = await restrictSharing(owner, W, 2, true);
+    check("LIM-2524: the reading workspace forbids both optional session upload tiers",
+      blockedSignals.status === 200 && blockedResults.status === 200 && blockedResults.json?.blocked?.join() === "1,2",
+      `${blockedSignals.status} ${blockedResults.text}`);
     const prefix = `/api/v2/workspaces/${W}`;
     const web = (u, method, suffix, body) => call(u.who, method, prefix + suffix, { cookie: u.cookie, body });
     const post = (suffix, body) => web(owner, "POST", suffix, body);
@@ -13668,7 +14527,7 @@ try {
     check("LIM-2524: both command routes hide the source from unselected or ungranted machines",
       refusedMachines.every((r) => r.status === 404 && !r.text.includes(privateCommand)), refusedMachines.map((r) => r.status).join(", "));
     const reported = (await get(g)).json.measure_readings;
-    check("LIM-2524 canary: both sources store only run metadata and readings and keep failures unknown",
+    check("LIM-2524 canary: both sources work with optional session tiers blocked, store only run metadata and readings, and keep failures unknown",
       ci.status === 201 && retry.status === 200 && retry.json.id === ci.json.id && conflict.status === 409 && stale.status === 409 &&
         extraCommand.status === 400 && failedCommand.status === 201 && reported[ciMeasure.id].value_num === 12.5 &&
         reported[ciMeasure.id].details.commit === ciBody.commit && reported[ciMeasure.id].details.run === "402.1" &&
@@ -14091,6 +14950,15 @@ try {
         `${sourced.measures[2].id}:unchanged:command`,
       ].join() && !five.text.includes("private-review-repository-canary") && !five.text.includes("private-review-device-canary") &&
       !five.text.includes("9007199254740993"), JSON.stringify(sources));
+    const resultDevice = insertDevice(owner.id, "Finding test machine");
+    const findingId = "private-review-finding-canary";
+    withDb((d) => d.prepare(`INSERT INTO v2_analysis_findings
+      (ws_id, session_key, epoch_id, device_id, id, goal_version, limit_id, evidence, digest, turn_started_at, received_at)
+      VALUES (?, ?, 'ep_test', ?, ?, 1, 'lim_test', 'wording', ?, ?, ?)`
+    ).run(W, boundKey, resultDevice.id, findingId, "a".repeat(64), daysAgo(1), daysAgo(1)));
+    const withFinding = await read();
+    check("LIM-2525: a stored derived finding makes no difference to the owner's review",
+      withFinding.text === withTeam.text && !withFinding.text.includes(findingId), withFinding.text);
     check("LIM-2525: unanswered and self-reported not met outcomes are distinguished without answer content",
       main?.outcomes.length === 2 && main.outcomes.find((o) => o.change_request_id === missed.id)?.outcome === "not_met" &&
       main.outcomes.find((o) => o.change_request_id === unanswered.id)?.outcome === null && !five.text.includes("private-review-answer-canary"), five.text);
@@ -14256,7 +15124,7 @@ try {
         check("LIM-2525 (390px): the review uses the source labels and shows an expired CI reading as stale",
           reviewWords.includes("self-reported") && reviewWords.includes("reported with a CI credential") &&
           reviewWords.includes("reported from a machine") && reviewWords.includes("is stale") &&
-          !reviewWords.includes("private-review-repository-canary"), reviewWords);
+          !reviewWords.includes("private-review-repository-canary") && !reviewWords.includes(findingId), reviewWords);
         check("LIM-2525 (390px): the unanswered outcome uses a readable date and keeps the UTC calendar day",
           reviewWords.includes(`was due ${dateLabel} and has no answer`) && !reviewWords.includes(today), reviewWords);
         await click(`${review} a`, "Add a goal");
@@ -14320,7 +15188,13 @@ try {
         // The request list scrolls to the hash after it loads. Wait before clicking the form button.
         await page.waitForFunction(() => document.querySelector("#change-requests")?.innerText.includes("No change requests yet."),
           { timeout: 15000 });
-        await click("#change-requests button", "Full change form");
+        const fullForm = (await find("#change-requests button", "Full change form")).asElement();
+        await fullForm.evaluate((button) => button.scrollIntoView({ block: "center" }));
+        await page.waitForFunction((button) => {
+          const box = button.getBoundingClientRect();
+          return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        }, { timeout: 15000 }, fullForm);
+        await fullForm.click();
         await click("#change-requests button", "Add a measure");
         await page.type('#change-requests [aria-label="Measure 1"]', "Release checks completed");
         const guidance = await text("#change-requests form");
@@ -16258,6 +17132,31 @@ try {
     `${gAppr.status} ${gTok.status} ${shares.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | ")}`,
   );
   const hostedHeaders = { authorization: `Bearer ${gTok.json?.access_token}` };
+  const hostedAnalysis = `/api/v2/workspaces/${W1id}/sessions/${sessionKey(gDev, W1id, "claude-code", "s1")}/analysis`;
+  const hostedConsent = await hosted("PUT", "/api/v2/devices/self/data-sharing", { headers: hostedHeaders, body: { enabled: true } });
+  const hostedStatus = await hosted("GET", hostedAnalysis + "?status=1", { headers: hostedHeaders });
+  const hostedFinding = await hosted("POST", hostedAnalysis, { headers: hostedHeaders, body: {
+    ...finding, turn_started_at: new Date().toISOString(),
+  } });
+  check("LIM-2526: hosted Align refuses derived-result consent and writes, and tells clients the tier is unavailable",
+    hostedConsent.status === 403 && hostedConsent.json?.error === "results_unavailable"
+      && hostedStatus.json?.enabled === false && hostedStatus.json?.available === false
+      && hostedFinding.status === 403 && hostedFinding.json?.error === "results_unavailable",
+    [hostedConsent, hostedStatus, hostedFinding].map((r) => r.text).join(" | "));
+  // Retained Mode L policy fixture. No requests go to this address.
+  const retainedAddress = "http://127.0.0.1:9001/v1/systemone";
+  withDb((d) => d.prepare("INSERT INTO v2_workspace_decision_services (ws_id, url, revision) VALUES (?,?,?)")
+    .run(W1id, retainedAddress, randomUUID()));
+  const hostedSharing = `/api/v2/workspaces/${W1id}/data-sharing`;
+  const [retainedPolicy, retainedSuggestion, retainedCheck] = await Promise.all([
+    hosted("GET", hostedSharing, { headers: hostedHeaders }),
+    hosted("GET", hostedSharing + "?for=model-suggestion&recipient=workspace&phase=dispatch", { headers: hostedHeaders }),
+    hosted("POST", hostedAnalysis.replace(/analysis$/, "model-check?phase=dispatch&epoch=unused"), { headers: hostedHeaders }),
+  ]);
+  check("Hosted mode hides a retained local HTTP recipient from both decision capabilities",
+    retainedPolicy.json?.decision_service === null && [retainedSuggestion, retainedCheck].every((response) => response.status === 200
+      && response.json?.enabled === false && !response.text.includes(retainedAddress)),
+    [retainedPolicy, retainedSuggestion, retainedCheck].map((response) => response.text).join(" "));
   const hostedGoals = `/api/v2/workspaces/${W1id}/goals`;
   const hostedCiSource = { repository: "team/release", branch: "main", check: "Build" };
   const hostedReadingGoal = await gPost(hostedGoals, { title: "Hosted readings", measures: [
@@ -16277,9 +17176,9 @@ try {
     headers: hostedHeaders,
     body: { goal_version: hostedCommand.json?.goal_version, run_id: randomUUID(), value: "2", exit_status: 0 },
   });
-  check("LIM-2524: hosted Align accepts configured CI and command readings",
+  check("LIM-2524: hosted Align accepts configured CI and command readings while refusing derived findings",
     hostedReadingGoal.status === 201 && hostedCredential.status === 201 && hostedCi.status === 201 &&
-      hostedCommand.status === 200 && hostedReading.status === 201,
+      hostedCommand.status === 200 && hostedReading.status === 201 && hostedFinding.json?.error === "results_unavailable",
     [hostedReadingGoal, hostedCredential, hostedCi, hostedCommand, hostedReading].map((r) => r.status).join(", "));
   // -- durable limits: per-address code sends (5 an hour, hosted) and Better Auth's per-client limit survive a restart --
   const rl = [];

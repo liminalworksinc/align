@@ -2,16 +2,29 @@
 // start in the background), run in-process so the tests can pace them.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
+import { once } from "node:events";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { credentialsFile, loadCredentials } from "../src/api.ts";
+import { decisionWindowStart } from "../src/decision-model.ts";
+import { signalsAllowed, uploadActivity } from "../src/activity.ts";
+import { enqueue } from "../src/share.ts";
+import { attributedCommit, happened, verdictsOf } from "../src/hooks/evidence.ts";
+import { exampleCrossings } from "../src/shared/drift.ts";
+import { takeLease } from "../src/lease.ts";
+import { kvSet } from "../src/db.ts";
+import { setRule } from "../src/shared/rules.ts";
+import { credentialsFile, loadCredentials, saveCredentials } from "../src/api.ts";
+import { prepareExcerpt, terminalText } from "../src/excerpts.ts";
+import { readTurn } from "../src/analysis-transcript.ts";
+import { inspectAnalysis, pathMatches, runAnalysis, setResultsEnabled } from "../src/analysis.ts";
 import { syncOnce } from "../src/sync.ts";
 import { sessionKey } from "../src/keys.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import { readJson } from "../src/shared/fsx.ts";
 import type { AsksFile, HotState } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
-import { pathHash, repoIdentity } from "../src/hooks/siblings.ts";
+import { pathHash, record, repoIdentity } from "../src/hooks/siblings.ts";
 import { appendLines, claudeAssistant, claudeUser, ctxFor, makeEnv, rows, runCli, runHook, touch, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -294,6 +307,7 @@ describe("e2e", () => {
     const ctx = ctxFor(t);
     try {
       await syncOnce(ctx, { tailBudgetMs: 200 });
+      prompt("::align share Ship");
       assert.match(prompt("::align share Ship confirm"), /sharing requested/);
       await syncOnce(ctx, { tailBudgetMs: 200 });
       const row = ctx.db.prepare("SELECT origin, synced FROM epochs WHERE local_id=?").get(localId("claude-code", sid));
@@ -329,11 +343,13 @@ describe("e2e", () => {
     assert.doesNotMatch(start(third, "fork"), /matches goal/);
     assert.match(start(fourth), /matches goal "Ship/);
 
+    prompt(first, "::align share Ship");
     assert.match(prompt(first, "::align share Ship confirm"), /sharing requested/);
     const otherGoal = await runCli(t, ["share", second, "--workspace", "ws_acme", "--goal", "g_perf", "--yes"]);
     assert.equal(otherGoal.code, 0, otherGoal.stderr);
     const noHint = await runCli(t, ["share", third, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
     assert.equal(noHint.code, 0, noHint.stderr);
+    prompt(fourth, "::align share --dir Ship");
     const hintedFolder = prompt(fourth, "::align share --dir Ship confirm");
     assert.match(hintedFolder, /This session too/);
     const ctx = ctxFor(t);
@@ -408,8 +424,10 @@ describe("e2e", () => {
     assert.equal(on.code, 0, on.stderr);
     assert.match(on.stdout, /Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name/);
     assert.match(on.stdout, /Never sent: prompts, responses, tool input or output\./);
+    assert.match(on.stdout, /A local Align server can receive them only if you turn sharing on/);
     const off = await runCli(t, ["share", "--dir", hashed, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
-    assert.match(off.stdout, /Work signals OFF: only keyed hashes of edited files are sent/);
+    assert.match(off.stdout, /Work signals OFF: Align can receive file hashes for edits and claims/);
+    assert.match(off.stdout, /A local Align server can receive them only if you turn sharing on/);
     assert.match((await runCli(t, ["rules"])).stdout, /app +-> +Acme \/ Ship.*work signals on/);
     const { halt } = await startSyncing(t);
     const A = "a0a0a0a0-1111-2222-3333-444444444444";
@@ -469,7 +487,7 @@ describe("e2e", () => {
     const pv = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x", cwd: repo, prompt: "::align share --dir Ship" }).stdout);
     assert.equal(pv.decision, "block");
     assert.match(pv.reason, /folder share preview/);
-    assert.match(pv.reason, /\(Add --signals to share file paths and task labels with the team\.\)/);
+    assert.match(pv.reason, /Work signals OFF: Align can receive file hashes for edits and claims\. Add --signals to share paths and labels with people who can read the goal\./);
     assert.equal((await runCli(t, ["rules"])).stdout.includes("repo-b"), false);
     const ok = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x2", cwd: repo, prompt: "::align share --dir Ship confirm" }).stdout);
     assert.match(ok.reason, /now shared with Acme/);
@@ -610,4 +628,906 @@ describe("e2e", () => {
     assert.match(st.stdout, /signed out/);
     ctx.db.close();
   });
+});
+
+test("local analysis of a signed-out rollout joins the root turn and calls without keeping transcript text", async () => {
+  const { fake, t } = await world();
+  try {
+    const ctx = ctxFor(t);
+    const sid = "local-rollout";
+    const root = "turn-local";
+    const tr = path.join(t.codexHome, "sessions", "rollout-local.jsonl");
+    const canary = "LOCAL-CONTENT-CANARY";
+    const prompt = { session_id: sid, turn_id: root, prompt: canary, cwd: t.root, transcript_path: tr };
+    const { transcript_path: _source, ...beforeStop } = prompt;
+    assert.equal(runHook(t, "codex", "UserPromptSubmit", beforeStop).code, 0);
+    const row = (type: string, payload: object) => ({ type, timestamp: new Date().toISOString(), payload });
+    const response = (type: string, payload: object) => row("response_item", { type, ...payload });
+    const event = (type: string, payload: object) => row("event_msg", { type, ...payload });
+    const message = response("message", { role: "assistant", content: [{ type: "output_text", text: canary }] });
+    writeLines(tr, [
+      row("session_meta", { id: sid }),
+      event("task_started", { turn_id: root }),
+      event("user_message", { message: canary }),
+      message, message,
+      response("function_call", { call_id: "one", arguments: canary }),
+      response("function_call_output", { call_id: "other", output: canary }),
+      response("function_call_output", { call_id: "one", output: canary }),
+      event("task_complete", { turn_id: root }),
+      event("task_started", { turn_id: "blocked" }),
+      event("user_message", { message: "::align status" }),
+      response("function_call", { call_id: "blocked-call", arguments: canary }),
+    ]);
+    assert.equal(runHook(t, "codex", "Stop", { ...prompt, last_assistant_message: canary }).stdout, "");
+    assert.equal((ctx.db.prepare("SELECT count(*) AS n FROM analysis_results").get())?.n, 0);
+    const pass = await syncOnce(ctx, { tailBudgetMs: 200 });
+    assert.ok((ctx.db.prepare("SELECT offset FROM files WHERE path=?").get(tr)?.offset as number) > 0);
+    assert.ok(!pass.serverError);
+    assert.deepEqual(fake.log, [], "signed-out analysis makes no request to the test server");
+    const got = JSON.parse((await runCli(t, ["analysis", "show", sid, "--json"])).stdout);
+    assert.deepEqual(got.turns[0].records, { replies: 1, calls: 1, results: 1 });
+    assert.equal(got.turns[0].goal, null);
+    assert.deepEqual(got.sent, []);
+    for (const file of ["align.db", "align.db-wal", "logs/align.log"]) {
+      const target = path.join(t.home, file);
+      if (fs.existsSync(target)) assert.equal(fs.readFileSync(target).includes(canary), false, file);
+    }
+    assert.match((await runCli(t, ["analysis", "delete", sid])).stdout, /Analysis deleted/);
+    const removed = JSON.parse((await runCli(t, ["analysis", "show", sid, "--json"])).stdout);
+    assert.deepEqual(removed.turns, []);
+    assert.equal(fs.readFileSync(tr).includes(canary), true);
+    ctx.db.close();
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("the analysis worker sends nothing by default and sends only the allowed finding while it owns its own lease", async () => {
+  const { fake, t } = await world();
+  const limit = { id: "lim_aaaaaaaaaaaa", type: "out_of_scope" as const, text: "Rewriting billing is out of scope.", source: null,
+    example_crossing: "I will replace invoice serialization." };
+  fake.bumpGoal("ws_acme", "g_ship", { limits: [limit] });
+  await login(t);
+  const ctx = ctxFor(t);
+  const sid = "test-bound-privacy";
+  const transcript = path.join(t.claudeDir, "projects", "analysis", `${sid}.jsonl`);
+  const cwd = t.root;
+  const tags = ["PROMPT-CANARY", "REPLY-CANARY", "INPUT-CANARY", "RESULT-CANARY"];
+  writeLines(transcript, [claudeUser(sid, "initial", new Date().toISOString(), { cwd })]);
+  runHook(t, "claude", "SessionStart", { session_id: sid, cwd, transcript_path: transcript });
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  const share = await runCli(t, ["share", sid, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
+  assert.equal(share.code, 0, share.stderr);
+  const mark = fake.log.length;
+  fake.requestBodies = [];
+  const complete = (root: string) => {
+    runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: root, prompt: tags[0], transcript_path: transcript, cwd });
+    const at = new Date().toISOString();
+    appendLines(transcript, [
+      claudeUser(sid, root, at, { cwd, message: { role: "user", content: tags[0] } }),
+      { type: "assistant", sessionId: sid, promptId: root, message: { content: [
+        { type: "text", text: `I will replace invoice serialization. ${tags[1]} is a tag.` },
+        { type: "tool_use", id: root, input: { value: tags[2] } },
+      ] } },
+      { type: "user", sessionId: sid, message: { content: [{ type: "tool_result", tool_use_id: root, content: tags[3] }] } },
+    ]);
+    runHook(t, "claude", "Stop", { session_id: sid, prompt_id: root, transcript_path: transcript, cwd });
+  };
+  complete("off");
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.equal(fake.log.slice(mark).some((row) => /analysis|data-sharing|work-signals/.test(row.path)), false);
+  assert.equal(inspectLocal().turns[0].findings.length, 1);
+  assert.match((await runCli(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
+  let separateLease = false;
+  let malformed = false;
+  fake.beforeRequest = (method, url) => {
+    if (method === "POST" && url.endsWith("/analysis")) {
+      separateLease = fs.existsSync(path.join(t.home, "analysis.lock")) && !fs.existsSync(path.join(t.home, "sync.lock"));
+    }
+  };
+  complete("on");
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  const findings = [...fake.findings.values()].flat() as { [key: string]: unknown }[];
+  assert.equal(findings.length, 1, JSON.stringify(fake.log.slice(mark)));
+  assert.deepEqual(Object.keys(findings[0]).sort(), ["digest", "epoch_id", "evidence", "goal_version", "id", "limit_id", "turn_started_at"]);
+  assert.equal(separateLease, true);
+  assert.equal(tags.some((tag) => JSON.stringify(fake.requestBodies).includes(tag)), false);
+  assert.deepEqual(inspectLocal().sent[0].finding, findings[0]);
+  const readable = await runCli(t, ["analysis", "show", sid]);
+  assert.match(readable.stdout, /Align acknowledged 1 finding/);
+  assert.match(readable.stdout, /--json/);
+  assert.doesNotMatch(readable.stdout, /delivery_unknown|epoch_id|goal_version/);
+  fake.findingsAvailable = false;
+  complete("now-hosted");
+  const sinceHosted = fake.log.length;
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.ok(fake.log.slice(sinceHosted).some((row) => row.method === "GET" && row.path.endsWith("/analysis")));
+  assert.ok(fake.log.slice(sinceHosted).every((row) => row.method !== "POST" || !row.path.endsWith("/analysis")));
+  const hostedChoice = await runCli(t, ["data-sharing", "results", "on"]);
+  assert.match(hostedChoice.stdout, /Hosted Align cannot receive derived findings/);
+  fake.findingsAvailable = true;
+  assert.match((await runCli(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
+  fake.findingsBlocked = true;
+  complete("blocked");
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.equal([...fake.findings.values()].flat().length, 1);
+  assert.equal(inspectLocal().turns.length, 4);
+  fake.offline = true;
+  assert.match((await runCli(t, ["analysis", "delete", sid])).stdout, /Deletion at Align is pending/);
+  assert.deepEqual(inspectLocal().turns, []);
+  fake.offline = false;
+  ctx.db.prepare("UPDATE sharing_outbox SET next_at = 0 WHERE kind = 'analysis_delete'").run();
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.equal(fake.findings.size, 0);
+  assert.equal(inspectLocal().deletion_pending, false);
+  ctx.db.close();
+
+  function inspectLocal() {
+    return inspectAnalysis(ctx, localId("claude-code", sid));
+  }
+});
+
+test("the transcript reader rejects ambiguous timestamp roots and labels capped counts in analysis inspection", async () => {
+  const t = makeEnv();
+  try {
+    const sid = "timestamp-root";
+    const transcript = path.join(t.claudeDir, "projects", "analysis", `${sid}.jsonl`);
+    const at = new Date().toISOString();
+    const start = { root: `ts:${at}`, at, cwd: t.root, binding: null, transcript };
+    const reply = (root: string, text: string) => ({
+      type: "assistant", sessionId: sid, promptId: root, message: { id: root, content: [{ type: "text", text }] },
+    });
+    const earlier = claudeUser(sid, "earlier", new Date(Date.parse(at) - 1000).toISOString());
+    const current = claudeUser(sid, "current", at);
+    writeLines(transcript, [earlier, reply("earlier", "Earlier reply"), current, current, reply("current", "Current reply")]);
+    assert.equal(readTurn("claude-code", sid, start), null);
+    assert.deepEqual(readTurn("claude-code", sid, { ...start, root: "current" })?.replies, ["Current reply"]);
+    writeLines(transcript, [current, current, reply("current", "Current reply")]);
+    assert.deepEqual(readTurn("claude-code", sid, start)?.replies, ["Current reply"]);
+    const ctx = ctxFor(t);
+    const root = "many-tools";
+    const hook = { session_id: sid, prompt_id: root, cwd: t.root, transcript_path: transcript };
+    runHook(t, "claude", "UserPromptSubmit", { ...hook, prompt: "Count the records" });
+    const calls = Array.from({ length: 201 }, (_, i) => ({
+      type: "assistant", sessionId: sid, promptId: root, message: { id: `message-${i}`, content: [
+        { type: "tool_use", id: `call-${i}` }, { type: "text", text: `Reply ${i}` },
+      ] },
+    }));
+    appendLines(transcript, [claudeUser(sid, root, new Date().toISOString()), ...calls, {
+      type: "user", sessionId: sid, message: { content: [{ type: "tool_result", tool_use_id: "call-200" }] },
+    }]);
+    runHook(t, "claude", "Stop", hook);
+    await syncOnce(ctx, { tailBudgetMs: 200 });
+    const summary = await runCli(t, ["analysis", "show", sid]);
+    assert.match(summary.stdout, /Replies: at least 200/);
+    assert.match(summary.stdout, /Tool calls: at least 200/);
+    assert.match(summary.stdout, /Tool results: unknown/);
+    const raw = JSON.parse((await runCli(t, ["analysis", "show", sid, "--json"])).stdout);
+    assert.deepEqual(raw.turns[0].records, { replies: 200, calls: 200, results: 0, lower_bounds: ["replies", "calls", "results"] });
+    ctx.db.close();
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("the rollout reader distinguishes an exact count at the cap from a truncated count", () => {
+  const t = makeEnv();
+  try {
+    const sid = "rollout-cap";
+    const transcript = path.join(t.codexHome, "sessions", "rollout-cap.jsonl");
+    const turn = { root: "rollout-turn", at: new Date().toISOString(), cwd: t.root, binding: null, transcript };
+    const event = (type: string, fields: object) => ({ type: "event_msg", payload: { type, ...fields } });
+    const calls = Array.from({ length: 201 }, (_, i) => ({
+      type: "response_item", payload: { type: "function_call", call_id: `call-${i}` },
+    }));
+    const messages = Array.from({ length: 201 }, (_, i) => event("agent_message", { message: `Reply ${i}` }));
+    const read = (count: number) => {
+      writeLines(transcript, [
+        { type: "session_meta", payload: { id: sid } },
+        event("task_started", { turn_id: turn.root }),
+        event("user_message", { message: "Count the records" }),
+        ...calls.slice(0, count), calls[0],
+        ...messages.slice(0, count), messages[0],
+        event("task_complete", { turn_id: turn.root }),
+      ]);
+      return readTurn("codex", sid, turn);
+    };
+    const exact = read(200);
+    const capped = read(201);
+    assert.equal(exact?.calls.size, 200);
+    assert.equal(exact?.replies.length, 200);
+    assert.equal(exact?.lowerBounds.size, 0);
+    assert.equal(capped?.calls.size, 200);
+    assert.equal(capped?.replies.length, 200);
+    assert.deepEqual(capped?.lowerBounds, new Set(["calls", "replies"]));
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("model and excerpt opt-ins send only their own fields, with the model running outside hooks", async (testContext) => {
+  const { fake, t } = await world();
+  const requests: Record<string, unknown>[] = [];
+  let unclear = false;
+  let separateLease = false;
+  let malformed = false;
+  let duplicateAnswer = false;
+  let extraCase: "refusal" | "missing" | "failure" | undefined;
+  let releaseAnswer: Promise<void> | undefined;
+  // Local test stand-in for the configured decision endpoint.
+  const vendor = http.createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+    separateLease = fs.existsSync(path.join(t.home, "analysis-decision.lock"))
+      && !fs.existsSync(path.join(t.home, "analysis.lock")) && !fs.existsSync(path.join(t.home, "sync.lock"));
+    await releaseAnswer;
+    if (extraCase === "failure") {
+      req.socket.destroy();
+      return;
+    }
+    assert.equal(req.headers.authorization, "Bearer test-key");
+    res.writeHead(200, { "content-type": "application/json" });
+    const answers = {
+      clear_0: { type: "noul", noul: unclear ? 0.5 : 0.99 },
+      crosses_0: { type: "choice", choice: "yes", probabilities: malformed
+        ? { yes: 0.98, no: 0.01, invalid: 0.01 } : { yes: 0.98, no: 0.01, can_not_tell: 0.01 } },
+    };
+    if (extraCase === "refusal" || extraCase === "missing") {
+      res.end(JSON.stringify(extraCase === "refusal" ? { refusal: true } : { answers: { clear_0: answers.clear_0 } }));
+      return;
+    }
+    res.end(duplicateAnswer
+      ? '{"answers":{"crosses_0":{"type":"refusal"},' + JSON.stringify(answers).slice(1) + '}'
+      : JSON.stringify({ answers }));
+  });
+  vendor.listen(0, "127.0.0.1");
+  await once(vendor, "listening");
+  cleanups.push(() => new Promise<void>((resolve) => vendor.close(() => resolve())));
+  const address = vendor.address();
+  assert.ok(address && typeof address !== "string");
+  const endpoint = `http://127.0.0.1:${address.port}/v1/systemone`;
+  const service = { url: endpoint, revision: "first-revision" };
+  fake.decisionServices.set("ws_acme", service);
+  const env = { ALIGN_DECISION_WORKSPACE_KEY: "test-key" };
+  const limit = { id: "lim_aaaaaaaaaaaa", type: "must_not" as const, text: "Keep the invoice history unchanged.", source: null };
+  fake.bumpGoal("ws_acme", "g_ship", { limits: [limit] });
+  await login(t);
+  const sid = "bound-excerpt-privacy";
+  const local = localId("claude-code", sid);
+  const transcript = path.join(t.claudeDir, "projects", "analysis", `${sid}.jsonl`);
+  const cwd = t.root;
+  const tags = ["PROMPT-CANARY", "EARLY-REPLY-CANARY", "FINAL-REPLY-CANARY", "TOOL-ARG-CANARY", "TOOL-RESULT-CANARY", "EXCERPT-CANARY"];
+  const hidden = "Before\u200bAfter";
+  const spelled = "Before\\u200bAfter";
+  const reply = `I'll remove the old entries. ${tags[2]} ${tags[5]} ${hidden} ${spelled}`;
+  const cli = async (args: string[], configuration = env) => {
+    const result = await runCli(t, args, configuration);
+    assert.equal(result.code, 0, result.stderr);
+    return result.stdout;
+  };
+  const prompt = (root: string, text: string) => runHook(t, "claude", "UserPromptSubmit",
+    { session_id: sid, prompt_id: root, prompt: text, transcript_path: transcript, cwd }, env);
+  function finish(root: string) {
+    assert.equal(runHook(t, "claude", "Stop", { session_id: sid, prompt_id: root, transcript_path: transcript, cwd }, env).code, 0);
+  }
+  function complete(root: string, final = reply, repeat = false, stop = true) {
+    assert.equal(prompt(root, tags[0]).code, 0);
+    appendLines(transcript, [
+      claudeUser(sid, root, new Date().toISOString(), { cwd, message: { role: "user", content: tags[0] } }),
+      ...(repeat ? [{ type: "assistant", sessionId: sid, promptId: root, message: { content: [{ type: "text", text: final }] } }] : []),
+      { type: "assistant", sessionId: sid, promptId: root, message: { content: [
+        { type: "text", text: tags[1] },
+        { type: "tool_use", id: root, input: { argument: tags[3] } },
+      ] } },
+      { type: "user", sessionId: sid, message: { content: [{ type: "tool_result", tool_use_id: root, content: tags[4] }] } },
+      { type: "assistant", sessionId: sid, promptId: root, message: { stop_reason: "end_turn", content: [{ type: "text", text: final }] } },
+    ]);
+    if (stop) finish(root);
+  }
+  writeLines(transcript, [claudeUser(sid, "start", new Date().toISOString(), { cwd })]);
+  assert.equal(runHook(t, "claude", "SessionStart", { session_id: sid, cwd, transcript_path: transcript }).code, 0);
+  await cli(["sync"]);
+  await cli(["share", sid, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
+
+  fake.requestBodies = [];
+  const mark = fake.log.length;
+  complete("opted-out");
+  await cli(["sync"]);
+  assert.equal(requests.length, 0);
+  assert.ok(!fake.log.slice(mark).some(({ path }) => /model-check|excerpts|analysis/.test(path)));
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+  const extractCode = (out: string) => {
+    const code = out.match(/\d{13}\.[a-f0-9]{32}/)?.[0];
+    assert.ok(code, out);
+    return code;
+  };
+  complete("repeat-before-model-consent", reply, false, false);
+  await cli(["sync"]);
+  const consent = await cli(["data-sharing", "model", "preview"]);
+  assert.ok(consent.includes(endpoint) && consent.includes("last assistant reply"));
+  assert.ok(!consent.includes(env.ALIGN_DECISION_WORKSPACE_KEY));
+  await cli(["data-sharing", "model", "on", extractCode(consent)]);
+  assert.equal(prompt("repeat-before-model-consent", tags[0]).code, 0);
+  finish("repeat-before-model-consent");
+  await cli(["sync"]);
+  assert.equal(requests.length, 0, "a repeated pre-consent turn cannot send a final reply");
+
+
+  complete("clear", reply, true);
+  const versionAtPrompt = hot(t, sid)?.goal?.version;
+  fake.bumpGoal("ws_acme", "g_ship", { title: "Ship the updated onboarding work", limits: [limit] });
+  assert.equal(requests.length, 0, "hooks do not call the decision endpoint");
+  await cli(["sync"]);
+  assert.equal(requests.length, 1);
+  assert.equal(separateLease, true);
+  assert.deepEqual(Object.keys(requests[0]).sort(), ["model", "questions", "state"]);
+  assert.equal(requests[0].state, reply);
+  assert.ok(JSON.stringify(requests[0]).includes(limit.text));
+  assert.ok(!JSON.stringify(requests[0]).includes(limit.id));
+  assert.ok([tags[0], tags[1], tags[3], tags[4]].every((tag) => !JSON.stringify(requests).includes(tag)));
+  assert.equal(fake.findings.size, 0);
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+
+  const inspected = () => cli(["analysis", "show", sid, "--json"]).then(JSON.parse);
+  const firstCheck = (await inspected()).turns.find((turn: { root: string }) => turn.root === "clear");
+  assert.equal(firstCheck.findings[0].reply, reply);
+  assert.equal(firstCheck.goal.version, versionAtPrompt);
+  const original = fs.readFileSync(transcript, "utf8");
+  fs.writeFileSync(transcript, original.replaceAll("FINAL-REPLY-CANARY", "Changed text"));
+  assert.match(await cli(["analysis", "show", sid]), /Final reply evidence: Unknown/);
+  fs.unlinkSync(transcript);
+  assert.match(await cli(["analysis", "show", sid]), /Final reply evidence: Unknown/);
+  fs.writeFileSync(transcript, original);
+  const notice = prompt("notice", "Continue").stdout;
+  assert.match(notice, /Keep the invoice history unchanged/);
+  assert.match(notice, /flagged the final reply/);
+  assert.doesNotMatch(notice, /CANARY/);
+  assert.match(prompt("wrong", "::align drift wrong").stdout, /false alarm feedback/);
+  await cli(["sync"]);
+  assert.equal((await inspected()).feedback[0].kind, "wrong");
+
+  unclear = true;
+  complete("unclear");
+  await cli(["sync"]);
+  assert.equal(requests.length, 2);
+  assert.deepEqual((await inspected()).turns.find((turn: { root: string }) => turn.root === "unclear").findings, []);
+  fake.modelChecksBlocked = true;
+  complete("blocked");
+  await cli(["sync"]);
+  fake.modelChecksBlocked = false;
+  fake.decisionServices.set("ws_acme", { url: `${endpoint}/changed`, revision: "changed-revision" });
+  complete("changed-recipient");
+  await cli(["sync"]);
+  assert.equal(requests.length, 2);
+  assert.notEqual((await runCli(t, ["data-sharing", "model", "on", extractCode(consent)], env)).code, 0);
+  fake.decisionServices.set("ws_acme", { ...service, revision: "restored-revision" });
+  complete("restored-address");
+  await cli(["sync"]);
+  assert.equal(requests.length, 2, "restoring an address does not restore its earlier consent");
+  await cli(["data-sharing", "model", "on", extractCode(await cli(["data-sharing", "model", "preview"]))]);
+  let releasePermission!: () => void;
+  const permissionHeld = new Promise<void>((resolve) => { releasePermission = resolve; });
+  let receivedPermission = false;
+  fake.beforeReply = async (method, url, status, answer) => {
+    if (url.endsWith("/model-check") && status === 200 && answer?.enabled) {
+      receivedPermission = true;
+      await permissionHeld;
+    }
+  };
+  complete("veto-in-flight");
+  const syncing = cli(["sync"]);
+  try {
+    await waitFor(() => receivedPermission, 3000, "allowed permission response is held");
+    fake.modelChecksBlocked = true;
+    await new Promise((resolve) => setTimeout(resolve, 1550));
+  } finally {
+    releasePermission();
+    await syncing;
+    fake.beforeReply = undefined;
+    fake.modelChecksBlocked = false;
+  }
+  assert.equal(requests.length, 2, "a delayed grant cannot send the reply after the veto");
+  complete("oversized", "x".repeat(2001));
+  await cli(["sync"]);
+  assert.equal(requests.length, 2);
+
+  unclear = false;
+  malformed = true;
+  complete("malformed");
+  await cli(["sync"]);
+  assert.equal(requests.length, 3);
+  assert.deepEqual((await inspected()).turns.find((turn: { root: string }) => turn.root === "malformed").findings, []);
+  malformed = false;
+  duplicateAnswer = true;
+  complete("duplicate-verdict");
+  await cli(["sync"]);
+  assert.equal(requests.length, 4);
+  assert.deepEqual((await inspected()).turns.find((turn: { root: string }) => turn.root === "duplicate-verdict").findings, []);
+  duplicateAnswer = false;
+
+  const held = Promise.withResolvers<void>();
+  releaseAnswer = held.promise;
+  complete("answer-after-block");
+  const inFlight = cli(["sync"]);
+  try {
+    await waitFor(() => requests.length === 5, 3000, "the test decision service received the final reply");
+    fake.modelChecksBlocked = true;
+  } finally {
+    held.resolve();
+    await inFlight;
+    fake.modelChecksBlocked = false;
+    releaseAnswer = undefined;
+  }
+  assert.deepEqual((await inspected()).turns.find((turn: { root: string }) => turn.root === "answer-after-block").findings, []);
+  const beforeExtraCases = requests.length;
+  for (const testCase of ["refusal", "missing", "failure"] as const) {
+    extraCase = testCase;
+    complete(testCase);
+    await cli(["sync"]);
+    assert.deepEqual((await inspected()).turns.find((turn: { root: string }) => turn.root === testCase).findings, []);
+  }
+  extraCase = undefined;
+  assert.equal(requests.length, beforeExtraCases + 3);
+  complete("multibyte-too-long", "é".repeat(1001));
+  await cli(["sync"]);
+  assert.equal(requests.length, beforeExtraCases + 3);
+  extraCase = "missing";
+  complete("multibyte-exact-limit", "é".repeat(1000));
+  await cli(["sync"]);
+  assert.equal(Buffer.byteLength(String(requests.at(-1)?.state)), 2000);
+  extraCase = undefined;
+  await cli(["data-sharing", "results", "on"]);
+  complete("both");
+  await cli(["sync"]);
+  const findings = [...fake.findings.values()].flat();
+  assert.equal(findings.length, 1);
+  assert.deepEqual(Object.keys(findings[0] as object).sort(), ["digest", "epoch_id", "evidence", "goal_version", "id", "limit_id", "turn_started_at"]);
+  assert.match(JSON.stringify(findings), /"evidence":"model"/);
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+  await cli(["data-sharing", "model", "off"]);
+
+  const file = path.join(t.root, "selected-excerpt.txt");
+  const args = [sid, "--turn", "clear", "--file", file, "--reader", "u_reader", "--purpose", "Review the proposal", "--hours", "24"];
+  fs.writeFileSync(file, tags[5]);
+  assert.notEqual((await runCli(t, ["excerpt", "preview", ...args], env)).code, 0);
+  const consentPath = "/api/v2/devices/self/data-sharing";
+  let releaseOn!: () => void;
+  const onHeld = new Promise<void>((resolve) => { releaseOn = resolve; });
+  let receivedOn = false;
+  fake.beforeReply = async (method, url, status, answer) => {
+    if (method === "PUT" && url === consentPath && status === 200 && answer?.enabled) {
+      receivedOn = true;
+      await onHeld;
+    }
+  };
+  const enabling = runCli(t, ["data-sharing", "excerpts", "on"], env);
+  try {
+    await waitFor(() => receivedOn, 3000, "enabled response is held");
+    await cli(["data-sharing", "excerpts", "off"]);
+  } finally {
+    releaseOn();
+    await enabling;
+    fake.beforeReply = undefined;
+  }
+  assert.match(await cli(["data-sharing"]), /Excerpts \(proposed\)\. Off/i);
+  assert.equal(fake.excerptConsent.size, 0);
+  assert.notEqual((await runCli(t, ["excerpt", "readers", sid], env)).code, 0);
+  await cli(["data-sharing", "excerpts", "on"]);
+  assert.match(await cli(["excerpt", "readers", sid]), /Named reader/);
+  fs.writeFileSync(file, `${hidden} ${spelled}`);
+  const hiddenPreview = await cli(["excerpt", "preview", ...args]);
+  assert.ok(hiddenPreview.includes('"Before\\u200bAfter Before\\\\u200bAfter"'), hiddenPreview);
+  assert.ok(!hiddenPreview.includes("\u200b"), "the preview displays the invisible character");
+  assert.match(await cli(["excerpt", "share", ...args, "--confirm", extractCode(hiddenPreview)]), /Excerpt shared/);
+  assert.ok(fake.requestBodies.some((body) => body.text === `${hidden} ${spelled}`), "the selected bytes are unchanged");
+  fs.writeFileSync(file, tags[5]);
+  const preview = await cli(["excerpt", "preview", ...args]);
+  assert.ok(preview.includes(JSON.stringify(tags[5])) && preview.includes("Named reader") && preview.includes("Review the proposal"));
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+  fs.writeFileSync(file, tags[2]);
+  assert.notEqual((await runCli(t, ["excerpt", "share", ...args, "--confirm", extractCode(preview)], env)).code, 0);
+  fs.writeFileSync(file, tags[5]);
+  const shareArgs = ["excerpt", "share", ...args, "--confirm", extractCode(preview)];
+  for (const [flag, value] of [["--reader", "u_elsewhere"], ["--purpose", "Another purpose"], ["--hours", "48"]]) {
+    const changed = [...shareArgs];
+    changed[changed.indexOf(flag) + 1] = value;
+    assert.notEqual((await runCli(t, changed, env)).code, 0, flag);
+  }
+  fake.excerptsBlocked = true;
+  assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+  fake.excerptsBlocked = false;
+  const sentBeforeGrant = fake.requestBodies.length;
+  let heldExcerptGrant = false;
+  fake.beforeReply = async (method, url, status, answer) => {
+    if (method === "GET" && url.endsWith("/excerpts") && status === 200 && answer?.enabled) {
+      heldExcerptGrant = true;
+      answer.send_for_ms = 60;
+      fake.excerptsBlocked = true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+  try {
+    assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+    assert.equal(heldExcerptGrant, true);
+    assert.doesNotMatch(JSON.stringify(fake.requestBodies.slice(sentBeforeGrant)), /EXCERPT-CANARY/);
+  } finally {
+    fake.beforeReply = undefined;
+    fake.excerptsBlocked = false;
+  }
+  assert.match(await cli(shareArgs), /Excerpt shared/);
+  const leaves = fake.requestBodies.filter((body) => JSON.stringify(body).includes("CANARY")) as unknown[];
+  assert.deepEqual(leaves, [{ id: `ex_${extractCode(preview).slice(14)}`, text: tags[5], purpose: "Review the proposal", readers: ["u_reader"], hours: 24 }]);
+  assert.equal(requests.length, 10);
+  await cli(["data-sharing", "excerpts", "off"]);
+  assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+  await cli(["data-sharing", "excerpts", "on"]);
+  assert.notEqual((await runCli(t, shareArgs, env)).code, 0, "renewed consent needs a new excerpt preview");
+  const oldResult = ctxFor(t);
+  try {
+    oldResult.db.prepare("UPDATE analysis_results SET result=json_remove(result, '$.source') WHERE local_id=? AND root=?")
+      .run(local, "clear");
+    assert.match(await cli(["excerpt", "preview", ...args]), /EXCERPT-CANARY/, "the prior result format can still resolve the original passage");
+    const selection = { turn: "clear", file, purpose: "Review the proposal", readerIds: ["u_reader"], hours: 24 };
+    const expiring = await prepareExcerpt(oldResult, local, selection);
+    const expires = Number(expiring.code.split(".")[0]) + 600_000;
+    const wallTime = Date.now.bind(Date);
+    const offset = expires - wallTime() - 300;
+    const wall = testContext.mock.method(Date, "now", () => wallTime() + offset);
+    let readerLookup = false;
+    fake.beforeReply = async (method, url, status, body) => {
+      if (method === "GET" && url.endsWith("/excerpts") && status === 200 && body?.send_for_ms) {
+        readerLookup = true;
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    };
+    const beforeExpired = fake.requestBodies.length;
+    try {
+      await assert.rejects(prepareExcerpt(oldResult, local, selection, expiring.code), /changed|expired/);
+      assert.equal(readerLookup, true);
+      assert.doesNotMatch(JSON.stringify(fake.requestBodies.slice(beforeExpired)), /EXCERPT-CANARY/);
+    } finally {
+      wall.mock.restore();
+      fake.beforeReply = undefined;
+    }
+
+  } finally {
+    oldResult.db.close();
+  }
+  const beforeDelete = await cli(["excerpt", "preview", ...args]);
+  const pendingReaders = Promise.withResolvers<void>();
+  const readersHeld = Promise.withResolvers<void>();
+  fake.beforeReply = async (method, url, status) => {
+    if (method === "GET" && url.endsWith("/excerpts") && status === 200) {
+      readersHeld.resolve();
+      await pendingReaders.promise;
+    }
+  };
+  const pendingShare = runCli(t, ["excerpt", "share", ...args, "--confirm", extractCode(beforeDelete)], env);
+  try {
+    await readersHeld.promise;
+    await cli(["analysis", "delete", sid]);
+  } finally {
+    pendingReaders.resolve();
+    fake.beforeReply = undefined;
+  }
+  assert.notEqual((await pendingShare).code, 0, "deleting the source while permission is loading prevents upload");
+  assert.deepEqual(fake.requestBodies.filter((body) => JSON.stringify(body).includes("CANARY")), leaves);
+
+  await cli(["data-sharing", "model", "on", extractCode(await cli(["data-sharing", "model", "preview"]))]);
+  const pairingRelease = Promise.withResolvers<void>();
+  let pairingGrantHeld = false;
+  fake.beforeReply = async (method, url, status, body) => {
+    if (method === "POST" && url.endsWith("/model-check") && status === 200 && body?.enabled) {
+      pairingGrantHeld = true;
+      await pairingRelease.promise;
+    }
+  };
+  complete("pairing-replaced");
+  const beforePairingChange = requests.length;
+  const pairingSync = runCli(t, ["sync"], env);
+  try {
+    await waitFor(() => pairingGrantHeld, 3000, "model permission waits for the replacement pairing");
+    await cli(["login", "--name", "Replacement device"]);
+  } finally {
+    pairingRelease.resolve();
+    fake.beforeReply = undefined;
+    await pairingSync;
+  }
+  assert.equal(requests.length, beforePairingChange, "the original grant cannot send after a pairing change");
+
+  for (const target of ["align.db", "align.db-wal", "logs/align.log", path.relative(t.home, layout.analysis(t.home, local))]) {
+    const file = path.join(t.home, target);
+    if (fs.existsSync(file)) assert.doesNotMatch(fs.readFileSync(file).toString(), /CANARY/, target);
+  }
+});
+
+test("the decision input comes from the completed rollout, preserving repeated text and abstaining on incomplete turns", () => {
+  const t = makeEnv();
+  try {
+    const tr = path.join(t.root, "rollout.jsonl");
+    const native = "model-test";
+    const root = "turn-test";
+    const rowsFor = (completion: object) => [
+      { type: "session_meta", payload: { id: native } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: root } },
+      { type: "event_msg", payload: { type: "user_message", message: "private prompt" } },
+      ...[["Repeat", "commentary"], ["Private interim", "commentary"], ["Repeat", "final_answer"]].map(([reply, phase]) => ({
+        type: "response_item", payload: { type: "message", role: "assistant", phase, content: [{ type: "output_text", text: reply }] },
+      })),
+      { type: "event_msg", payload: { turn_id: root, ...completion } },
+    ];
+    const read = () => readTurn("codex", native, { root, transcript: tr, at: new Date().toISOString() });
+    writeLines(tr, rowsFor({ type: "task_complete" }));
+    assert.equal(read()?.finalReply, "Repeat");
+    writeLines(tr, rowsFor({ type: "task_complete", last_agent_message: "Authoritative final text" }));
+    assert.equal(read()?.finalReply, "Authoritative final text");
+    writeLines(tr, rowsFor({ type: "turn_aborted" }));
+    assert.equal(read()?.finalReply, null);
+    writeLines(tr, rowsFor({ type: "task_complete" }).filter((row) => row.payload.phase !== "final_answer"));
+    assert.equal(read()?.finalReply, null);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("transcript selection follows parent links and waits for an authoritative final reply", () => {
+  const t = makeEnv();
+  try {
+    const native = "linked-reply";
+    const at = new Date().toISOString();
+    const transcript = path.join(t.root, "linked.jsonl");
+    const turn = { root: `ts:${at}`, at, transcript };
+    const prompt = { ...claudeUser(native, "current", at), uuid: "current" };
+    const reply = (id: string, parentUuid: string, text: string, stop_reason: string | null = null) => ({
+      type: "assistant", sessionId: native, uuid: id, parentUuid,
+      message: { id: id === "outside" ? id : "reply", stop_reason, content: [{ type: "text", text }] },
+    });
+    const earlier = { ...claudeUser(native, "earlier", new Date(Date.parse(at) - 3000).toISOString()), uuid: "earlier" };
+    writeLines(transcript, [earlier, prompt, reply("outside", "earlier", "Other turn"), reply("interim", "current", "Interim")]);
+    const read = () => readTurn("claude-code", native, turn);
+    assert.deepEqual(read()?.replies, ["Interim"]);
+    assert.equal(read()?.finalReply, null);
+    appendLines(transcript, [reply("final", "interim", "Final", "end_turn")]);
+    assert.equal(read()?.finalReply, "Final");
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("rollout timestamp selection counts distinct reply identities and marks corrupt records incomplete", () => {
+  const t = makeEnv();
+  try {
+    const native = "rollout-time";
+    const at = new Date().toISOString();
+    const transcript = path.join(t.root, "rollout-time.jsonl");
+    const turn = { root: `ts:${at}`, at, transcript };
+    const rows = [
+      { type: "session_meta", payload: { id: native } },
+      { timestamp: new Date(Date.parse(at) - 3000).toISOString(), type: "event_msg", payload: { type: "task_started", turn_id: "root" } },
+      { timestamp: at, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_image" }, { type: "input_text", text: "Text with image" }] } },
+      ...["first", "second"].map((id) => ({
+        type: "response_item", payload: { id, type: "message", role: "assistant", content: [{ type: "output_text", text: "Same reply" }] },
+      })),
+    ];
+    writeLines(transcript, rows);
+    fs.appendFileSync(transcript, "{broken\n");
+    const read = () => readTurn("codex", native, turn);
+    assert.equal(read()?.prompt, "Text with image");
+    assert.deepEqual(read()?.replies, ["Same reply", "Same reply"]);
+    assert.deepEqual(read()?.lowerBounds, new Set(["calls", "results", "replies"]));
+    assert.equal(read()?.finalReply, null);
+    appendLines(transcript, [{ type: "event_msg", payload: { type: "task_complete", turn_id: "root", last_agent_message: "Final" } }]);
+    assert.ok(read()?.lowerBounds.has("calls"));
+  } finally {
+    t.cleanup();
+  }
+});
+
+
+test("exact previews show blank characters and distinguish literal escape spellings", () => {
+  assert.equal(terminalText("A\u2800B A\\u2800B"), '"A\\u2800B A\\\\u2800B"');
+});
+
+
+test("a partly rolled back clock invalidates a dispatch window", (t) => {
+  let wall = 10_000;
+  let monotonic = 50;
+  t.mock.method(Date, "now", () => wall);
+  t.mock.method(performance, "now", () => monotonic);
+  const remaining = decisionWindowStart();
+  wall += 250;
+  monotonic += 250;
+  assert.ok(remaining(750) > 0);
+  wall -= 200;
+  monotonic += 10;
+  assert.equal(remaining(750), 0);
+  wall += 210;
+  assert.equal(remaining(750), 0, "a window with uncertain expiry stays closed");
+});
+
+test("a new folder choice leaves existing sessions off and newer queue work survives the old outbox", () => {
+  const t = makeEnv();
+  const ctx = ctxFor(t);
+  try {
+    const lid = "old-share";
+    setRule(t.home, { dir: t.root, workspace_id: "ws_new", workspace_name: "New", goal_id: null, goal_title: null, signals: true });
+    assert.equal(signalsAllowed(ctx, lid), false);
+    for (const kind of ["analysis_put", "analysis_delete", "work_signals_off", "future_sharing_operation"]) enqueue(ctx, lid, kind, {});
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS n FROM outbox").get()?.n, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS n FROM sharing_outbox").get()?.n, 4);
+  } finally {
+    ctx.db.close();
+    t.cleanup();
+  }
+});
+
+
+test("a successful no-op edit and explicitly safe wording do not become evidence", () => {
+  const at = new Date().toISOString();
+  const verdict = verdictsOf([{ t: "ran", u: "edit", at, tool_verdict: 1 }]);
+  const failed = verdictsOf([{ t: "failed", u: "edit", at, tool_verdict: 1 }]);
+  assert.equal(happened({ t: "edit", at, u: "edit", p: "/unchanged" }, failed, true, null), false);
+  assert.equal(attributedCommit({ t: "commit", at, s: "Edit the archived invoices" }), null);
+  assert.equal(happened({ t: "edit", at, u: "edit", p: "/unchanged", v: { no: 1 } }, verdict, true, null), false);
+  const limit = { id: "lim_aaaaaaaaaaaa", type: "must_not" as const, text: "Remove the invoices.", source: null,
+    example_crossing: "I replaced invoice serialization.", example_within: "I will remove the invoices." };
+  assert.deepEqual(exampleCrossings(limit, "I will remove the invoices.", {}), []);
+  assert.deepEqual(exampleCrossings(limit, "I replaced invoice serialization.", {}).map((finding) => finding.example), [true]);
+  assert.deepEqual(exampleCrossings(limit, "I never replaced invoice serialization.", {}), []);
+});
+
+
+test("an offline off then on delivers both choices and logout cannot enable derived results", async () => {
+  const { fake, t } = await world();
+  await login(t);
+  const ctx = ctxFor(t);
+  try {
+    assert.equal(await setResultsEnabled(ctx, true), "saved");
+    const device = loadCredentials(t.home)!.device_id;
+    const first = fake.resultConsent.get(device);
+    assert.ok(first);
+    fake.offline = true;
+    assert.equal(await setResultsEnabled(ctx, false), "pending");
+    assert.equal(await setResultsEnabled(ctx, true), "pending");
+    fake.offline = false;
+    fake.requestBodies = [];
+    const mark = fake.requestBodies.length;
+    await syncOnce(ctx, { tailBudgetMs: 200 });
+    const choices = fake.requestBodies.slice(mark).filter((body) => body && Object.keys(body).join() === "enabled");
+    assert.deepEqual(choices, [{ enabled: false }, { enabled: true }]);
+    assert.ok(fake.resultConsent.get(device)! > first);
+    await runCli(t, ["logout"]);
+    await assert.rejects(setResultsEnabled(ctx, true), /Sign in/);
+  } finally {
+    fake.offline = false;
+    ctx.db.close();
+  }
+});
+
+
+test("activity rechecks consent after refresh and retries a rejected name as a hash", async () => {
+  const { fake, t } = await world();
+  await login(t);
+  const ctx = ctxFor(t);
+  const sid = "in-flight-signals";
+  const lid = localId("claude-code", sid);
+  const git = path.join(t.root, ".git");
+  fs.mkdirSync(git, { recursive: true });
+  fs.writeFileSync(path.join(git, "HEAD"), "ref: refs/heads/main\n");
+  runHook(t, "claude", "SessionStart", { session_id: sid, cwd: t.root, source: "startup" });
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.equal((await runCli(t, ["share", sid, "--goal", "g_ship", "--signals", "--yes"])).code, 0);
+  const file = path.join(t.root, "PRIVATE-PATH-CANARY");
+  fs.writeFileSync(file, "test data");
+  const add = () => record(t.home, lid, [{ t: "edit", p: file, at: new Date().toISOString(), g: "g_ship", via: "git" }]);
+  try {
+    add();
+    let refreshStarted = false;
+    const release = Promise.withResolvers<void>();
+    fake.beforeReply = async (method, url, status, body) => {
+      if (method === "PUT" && url.endsWith("/work-signals") && status === 200 && body?.enabled) {
+        const c = loadCredentials(t.home)!;
+        saveCredentials(t.home, { ...c, access_expires_at: new Date().toISOString() });
+      }
+      if (url.endsWith("/device/refresh")) {
+        refreshStarted = true;
+        await release.promise;
+      }
+    };
+    fake.requestBodies = [];
+    const mark = fake.requestBodies.length;
+    const first = uploadActivity(ctx);
+    try {
+      await waitFor(() => refreshStarted, 3000, "activity waited for fresh credentials");
+      kvSet(ctx.db, `signals:${lid}`, "0");
+    } finally {
+      release.resolve();
+    }
+    assert.equal(await first, 1);
+    assert.doesNotMatch(JSON.stringify(fake.requestBodies.slice(mark)), /PRIVATE-PATH-CANARY/);
+    fake.beforeReply = undefined;
+    kvSet(ctx.db, `signals:${lid}`, "1");
+    add();
+    fake.beforeRequest = (method, url) => {
+      if (method === "POST" && url.endsWith("/activity")) {
+        fake.workSignals.clear();
+        fake.beforeRequest = undefined;
+      }
+    };
+    const sentBefore = fake.activity.length;
+    assert.equal(await uploadActivity(ctx), 1);
+    assert.equal(fake.activity.length, sentBefore + 1);
+    assert.equal(fake.activity.at(-1)?.path, null);
+    assert.equal(fake.activity.at(-1)?.path_hash, fake.activity[0].path_hash);
+    const other = await world();
+    const otherLog = other.fake.log.length;
+    fake.activityRedirect = `${other.fake.url}/received-activity`;
+    add();
+    assert.equal(await uploadActivity(ctx), 0);
+    assert.equal(other.fake.log.length, otherLog, "a redirect cannot receive the opt-in payload");
+    fake.activityRedirect = undefined;
+    assert.equal(await uploadActivity(ctx), 1, "a redirect leaves the activity queued");
+  } finally {
+    fake.beforeReply = undefined;
+    fake.beforeRequest = undefined;
+    ctx.db.close();
+  }
+});
+
+
+test("path patterns match whole segments at every supported wildcard boundary", () => {
+  assert.equal(pathMatches("a/*/sample.ts", "a/group/sample.ts"), true);
+  assert.equal(pathMatches("a/*/sample.ts", "before/a/group/sample.ts"), false);
+  assert.equal(pathMatches("a/*/sample.ts", "a/group/nested/sample.ts"), false);
+  assert.equal(pathMatches("a/*/sample.ts", "a/group/sample.ts.bak"), false);
+  assert.equal(pathMatches("a/**/sample.ts", "a/sample.ts"), true);
+  assert.equal(pathMatches("a/**/sample.ts", "a/group/nested/sample.ts"), true);
+});
+
+test("analysis retries an unreadable turn under its own lease and retains an earlier pending notice", async () => {
+  const t = makeEnv();
+  const ctx = ctxFor(t);
+  const native = "unreadable-turn";
+  const lid = localId("claude-code", native);
+  const root = "missing";
+  const at = new Date().toISOString();
+  const input = { harness: "claude-code", native, legacy: false, turn: {
+    root, at, cwd: t.root, binding: null, transcript: path.join(t.root, "unreadable.jsonl"),
+  } };
+  const pending = () => ctx.db.prepare("SELECT attempts FROM analysis_jobs WHERE local_id=? AND root=?").get(lid, root)?.attempts;
+  try {
+    ctx.db.prepare("INSERT INTO analysis_jobs(local_id, root, input, ended_at) VALUES(?,?,?,?)")
+      .run(lid, root, JSON.stringify(input), at);
+    const release = takeLease(ctx, "analysis");
+    assert.ok(release);
+    try {
+      await runAnalysis(ctx);
+      assert.equal(pending(), 0);
+    } finally {
+      release();
+    }
+    for (const attempts of [1, 2]) {
+      await runAnalysis(ctx);
+      assert.equal(pending(), attempts);
+      ctx.db.prepare("UPDATE analysis_jobs SET next_at=0 WHERE local_id=?").run(lid);
+    }
+    await runAnalysis(ctx);
+    assert.equal(pending(), undefined);
+    assert.equal(inspectAnalysis(ctx, lid).turns[0].records, null);
+
+    const oldNotice = { id: "one", root: "earlier", version: 1, title: "Earlier goal",
+      limit: { id: "lim_aaaaaaaaaaaa", text: "Keep archived entries.", type: "must" }, evidence: "tool", digest: "one" };
+    const insert = ctx.db.prepare("INSERT INTO analysis_results VALUES(?,?,?,?,?)");
+    for (let n = 0; n < 14; n++) {
+      const ended = new Date(Date.parse(at) + n + 1).toISOString();
+      insert.run(lid, "ready-" + n, at, ended, JSON.stringify({ notices: true, findings: n === 0 ? [oldNotice] : [] }));
+    }
+    ctx.db.prepare("INSERT INTO analysis_projection VALUES (?)").run(lid);
+    await runAnalysis(ctx);
+    assert.deepEqual(readJson(layout.analysis(t.home, lid)), [oldNotice]);
+  } finally {
+    ctx.db.close();
+    t.cleanup();
+  }
 });

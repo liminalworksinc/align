@@ -367,6 +367,17 @@ document, and fill the placeholders `[LEGAL ENTITY]`, `[ADDRESS]`, `[PRIVACY CON
 `[SECURITY CONTACT EMAIL]` from `lib/trust/entity.ts`; the sign-in and request-access cards SHALL end with links to
 both pages, and the request-access form SHALL link to `/privacy`.
 
+The security overview SHALL identify the additional data tiers as proposed, say that metadata is the default,
+and say that derived findings stay on the machine when using hosted Align.
+The subprocessor list SHALL name only actual recipients in service.
+
+Trust, Privacy and sharing settings SHALL say that metadata is the default in both hosted and local mode.
+They SHALL describe the separate opt-ins and recipients, including a first prompt, branch, saved repository
+alias and eligible goal ids and titles for model suggestions, the final reply and applicable limit types and
+wording for model checks, and exact selected text, readers, purpose and expiry for excerpts. They SHALL explain
+that derived findings can only be shared with a local Align server.
+The public excerpt retention entry SHALL explain deletion and expiry using reader-facing terms.
+
 #### Scenario: Reading the trust page
 
 - **WHEN** anyone opens `/trust`
@@ -381,6 +392,26 @@ both pages, and the request-access form SHALL link to `/privacy`.
 
 - **WHEN** someone opens `/app/sign-in` or `/app/request-access`
 - **THEN** the card ends with **Privacy** (`/privacy`) and **Trust and security** (`/trust`)
+
+### Requirement: Sharing restrictions in the workspace
+
+A workspace owner's People page SHALL offer labelled controls to forbid the optional tiers, explain that people
+choose what to share from their machines, and fit a 390 pixel screen. The limit editor SHALL label optional
+`File path anchors`, `Example that crosses the limit` and `Example within the limit` fields. Validation SHALL
+name those labels and preserve the person's input. The approval comparison SHALL show the approved and proposed
+values of changed limit fields, including path anchors and both examples, with their own labels and a clear empty value
+for a removal.
+
+#### Scenario: Reading restrictions and examples at phone width
+
+- **WHEN** the owner opens People at 390 pixels and an approver edits a limit
+- **THEN** the owner can change each restriction without horizontal scrolling, and the approver can enter and correct each optional field by its own label
+
+
+#### Scenario: Reviewing a limit with changed examples
+
+- **WHEN** a request changes an anchor or an example while keeping the limit text
+- **THEN** before approval, the comparison shows the actual old and proposed values on their respective sides at 390 pixels
 
 ### Requirement: Device approval screen
 
@@ -1377,7 +1408,8 @@ Every change request card on the goal page SHALL show (the Requests tab lists re
 
 When the version being launched has measures, the goal page and Requests drawer SHALL offer an optional collapsed
 "What do you expect this to change?" block for Launch or Approve and launch, with labelled fields for the measure from the version being launched,
-expected value, date and evidence. The existing form rules SHALL apply. The launched request SHALL show
+expected value, date and evidence. The existing form rules SHALL apply. At phone widths, a review drawer whose
+decision controls exceed the screen height SHALL let the person scroll to the confirmation. The launched request SHALL show
 "Expected: <text> by <date>" and "Not answered yet" or "Reported met", "Reported not met" or "Reported can't tell"
 with who and when, labelled self-reported. The request SHALL offer an early answer and an eligible correction
 using the same outcome form as Home. Validation messages for the optional expectation fields SHALL use their
@@ -1389,6 +1421,11 @@ leave the outcome unrecorded and the entered values available to edit.
 
 - **WHEN** a launcher opens the launch controls on a request that launches a version with measures
 - **THEN** launching needs no expectation, and opening the optional block lets them choose from the exact version's measures and review what they entered before confirming approval and launch
+
+#### Scenario: A short phone screen shows the expanded launch form
+
+- **WHEN** the expectation form and the decision forecast together exceed the space in the review drawer
+- **THEN** the confirmation remains reachable by scrolling, and approving and launching keeps the expectation entered in the drawer.
 
 #### Scenario: An outcome link uses HTTP
 
@@ -1548,6 +1585,25 @@ member's role or remove a member, and let any member leave.
 - **WHEN** a role change, removal or leave gets 409 `last_owner`
 - **THEN** the page shows "A workspace needs at least one owner. Make someone else an owner first." and nothing changes
 
+### Requirement: A workspace owner can block model-based goal suggestions
+
+The People tab's sharing restrictions SHALL let a workspace owner block both proposed model choices with
+**Block Model-based goal suggestions (proposed)**. The control SHALL reflect the workspace policy and fit
+at 390 pixels. The device's own consent stays separate. People SHALL display an owner-only
+**Decision service address** field, with a plain validation message beside it. An untouched field SHALL reflect
+the latest retrieved saved address. The CLI SHALL distinguish a current recipient from expired consent and
+state when current policy could not be read.
+
+#### Scenario: Change the workspace choice on a phone
+
+- **WHEN** an owner checks or clears the model suggestions restriction at 390 pixels
+- **THEN** the new setting appears on the checkbox and the page fits the screen.
+
+#### Scenario: An owner saves the decision service address on a phone
+
+- **WHEN** the owner enters or clears the Decision service address at 390 pixels
+- **THEN** the saved address is shown in the field, or the field is empty after removal. Invalid addresses leave the saved value as it was and show how to correct the field.
+
 ### Requirement: Workspace People tab invites
 
 The People tab SHALL give workspace owners an "Invite someone" card that creates an email-bound invite link,
@@ -1643,7 +1699,7 @@ Own session rows SHALL include nullable `team_budget_label`: a sentence naming t
 #### Scenario: How the session was bound
 
 - **WHEN** a session is shown in either list
-- **THEN** its current binding reads "Shared by hand", "Folder rule", "After a repo hint", "Alignment", "Switch request accepted", "Past sessions import", "Suggested by an agent" or "Suggested by a model", as recorded. With no current binding, both lists show "Last binding: <origin label>" for the most recent binding. A binding with null origin reads "Not recorded". A session with no binding history shows no origin label. The owner's list shows the origin label without the binding's goal or directive.
+- **THEN** its current binding reads "Shared by hand", "Folder rule", "After a repo hint", "Alignment", "Switch request accepted", "Past sessions import", "Suggested by an agent", "Suggested by a model" or "Suggested from this machine", as recorded. With no current binding, both lists show "Last binding: <origin label>" for the most recent binding. A binding with null origin reads "Not recorded". A session with no binding history shows no origin label. The owner's list shows the origin label without the binding's goal or directive.
 
 ### Requirement: Workspace Alignments tab
 
@@ -1826,7 +1882,7 @@ The tab SHALL offer the monthly team CSV export and the team-budget screens spec
 #### Scenario: Expand a goal's usage by origin
 
 - **WHEN** a person expands "By sharing source" on a goal row in By goal
-- **THEN** the row shows the number of requests and estimated list cost per origin with the same labels as Sessions. Priced amounts use the goal total's display precision and add up to its rounded value. Round each amount down to that precision, then give one unit each to the largest remainders until they reach the rounded total, in display order when remainders tie. All-unpriced groups show "Unknown" for cost and partial estimates say how many requests were unpriced. Rolled-up days have their own "Not recorded (rolled up)" line. Private goals remain grouped without a breakdown. The expanded rows fit at 390 pixels wide.
+- **THEN** the row shows the number of requests and estimated list cost per origin with the same labels as Sessions. Priced amounts use the goal total's display precision and add up to its rounded value. Round each amount down to that precision, then give one unit each to the largest remainders until they reach the rounded total, in display order when remainders tie. All-unpriced groups and usage rows show "Unknown" for cost and partial estimates say how many requests were unpriced. Rolled-up days have their own "Not recorded (rolled up)" line. Private goals remain grouped without a breakdown. The expanded rows fit at 390 pixels wide.
 
 #### Scenario: Agent time against targets
 
@@ -1987,6 +2043,21 @@ pills with their own colors: "accepted by the developer" green, "declined" red a
   "Nobody approves or launches a dependency they can't see" forbids; an unnamed "someone who can see every goal it
   depends on" says the same thing whenever the set is small. No safe wording is chosen yet, so the full set stays.
 
+### Requirement: Deliberate excerpts on Sessions
+
+Sessions SHALL offer a link to shared excerpts and show active excerpts shared by or with the signed-in person.
+Each item SHALL show who shared it, its purpose, and when it expires. Opening the item shows the exact text as
+plain text. Only the sharer sees the revoke action. The workspace sharing controls allow an owner to forbid new
+excerpts and model checks without allowing either on any device. If opening or removing an excerpt from a stale
+list returns 404, Sessions SHALL remove the listing and any open text for that item, refresh the list and explain
+that access ended.
+
+#### Scenario: Read and revoke on a phone
+
+- **WHEN** a named reader opens an excerpt with long text at 390 pixels and the sharer revokes their copy
+- **THEN** the text wraps within the page, the reader has no revoke action, and new reads after revocation cannot
+  return the excerpt. If the reader tries to open it from a stale list, the page removes the item and says access ended
+
 ## Sources
 
 - `proxy.ts`
@@ -2076,3 +2147,15 @@ pills with their own colors: "accepted by the developer" green, "declined" red a
 - `app/app/_ui/home/since.tsx`
 - `app/app/_ui/home/needs-list.tsx`
 - `scripts/test-budgets.mjs`
+
+### Requirement: Consistent limit changes and sharing disclosures
+
+Both approval views SHALL show before and after values for a changed path anchor, crossing example or safe
+example. The change and counter forms SHALL submit a change to any one of these fields without also editing
+the limit statement. Trust and Privacy SHALL state the same metadata default, recipients, independent settings
+and retention periods. Retention rows SHALL use readable labels.
+
+#### Scenario: An example is the only change
+
+- **WHEN** a person corrects only an example and an approver opens the same request on its goal and in Requests
+- **THEN** both views show the actual example change and are usable on a 390 pixel wide screen

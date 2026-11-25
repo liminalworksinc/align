@@ -24,7 +24,7 @@ export function changedElements(base: Content, changes: Partial<Content>): Chang
     out.push({ kind: "measure", element_key: (after ?? before)!.id, change });
   }
   for (const { before, after, change } of keyedChanges(base.limits, changes.limits ?? base.limits, id,
-    (a, b) => limitChanged(a, b) || JSON.stringify(a.source ?? null) !== JSON.stringify(b.source ?? null))) {
+    limitChanged)) {
     out.push({ kind: "limit", element_key: (after ?? before)!.id, change });
   }
   for (const { before, after, change } of keyedChanges(base.depends_on, changes.depends_on ?? base.depends_on, (key) => key, () => false)) {

@@ -102,6 +102,7 @@ describe("C7-1: shared again toward the goal already in context, after a folder 
     assert.equal(hot(t, A.lid).share?.state, "shared");
     assert.equal(prompt(t, A.sid, "go on", dir)?.hookSpecificOutput?.additionalContext, undefined, "the share it was told about: nothing new");
     await relogin(t);
+    prompt(t, A.sid, "::align share", dir);
     assert.match(prompt(t, A.sid, "::align share confirm", dir).reason, /sharing requested toward "Ship the v2 onboarding flow"/);
     await sync(t);
     const told = prompt(t, A.sid, "go on", dir);
@@ -111,6 +112,7 @@ describe("C7-1: shared again toward the goal already in context, after a folder 
     // Another rule session, shared again the same way, whose next hook call is a resume: the envelope again.
     const B = await ruleSession(t, dir);
     await relogin(t);
+    prompt(t, B.sid, "::align share", dir);
     assert.match(prompt(t, B.sid, "::align share confirm", dir).reason, /sharing requested/);
     await sync(t);
     assert.match(start(t, B.sid, "resume", dir)?.hookSpecificOutput?.additionalContext ?? "", /Ship the v2 onboarding flow/, "a resume gets the envelope again");
@@ -134,6 +136,7 @@ describe("C7-2: signed out and in again, the session's notice says what holds no
     assert.match(deny(t, A) ?? "", /so tools stay blocked until it is shared again \(the user can type `::align share` in this session\)/);
     assert.equal(start(t, B.sid, "resume", B.cwd)?.systemMessage, AGAIN);
     assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, undefined, "once");
+    prompt(t, A.sid, "::align share", A.cwd);
     assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested/);
     await sync(t);
     assert.ok(!hot(t, A.lid).notices.some((x) => /signed (in to|out of) Align/.test(x.text)), "shared again: neither notice is left");
@@ -334,11 +337,13 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     fs.mkdirSync(cwd, { recursive: true });
     start(t, sid, "startup", cwd);
     assert.match(prompt(t, sid, "::align share Cut hook", cwd).reason, new RegExp(`Goal: Cut hook latency; counts from session start\\. ${HELD.replace(/[.()]/g, "\\$&")}`));
+    prompt(t, sid, "::align share Cut hook", cwd);
     assert.equal(prompt(t, sid, "::align share Cut hook confirm", cwd).reason, `Align: sharing requested toward "Cut hook latency". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal. ${HELD}`);
     const sid2 = newSid();
     const cwd2 = path.join(t.root, "held-dir");
     fs.mkdirSync(cwd2, { recursive: true });
     start(t, sid2, "startup", cwd2);
+    prompt(t, sid2, "::align share --dir Cut hook", cwd2);
     assert.match(prompt(t, sid2, "::align share --dir Cut hook confirm", cwd2).reason, new RegExp(HELD.replace(/[.()]/g, "\\$&")));
   });
 
