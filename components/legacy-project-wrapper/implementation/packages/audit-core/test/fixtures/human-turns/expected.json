@@ -1,0 +1,149 @@
+{
+  "schema": "liminal.human-turns-golden.v1",
+  "about": "Shared golden fixtures for what counts as one operator (human) turn in Codex rollouts and Claude Code sessions. Line shapes are the real ones; every text is synthetic. The closure correction extractor (closure/ingest/agent-corrections.ts) and the desktop goal-source parser (src-tauri/src/goal_sources) must both return exactly `turns` for each file. `synthetic`, `sidechain` and `automated` count user-slot lines that are not human turns. `turns_with_automated` is the result when automated runs are opted in. Every turn is closed (by the next turn or a terminal event) and dated 2026-08-25, so a parser that only emits finished turns inside a 90 day window returns the same list.",
+  "policy_now": "2026-08-26T12:00:00Z",
+  "codex": [
+    {
+      "file": "codex/rollout-cli-wrappers.jsonl",
+      "skip": null,
+      "turns": [
+        "don't push anything without asking me first",
+        "You are right, use the other branch.",
+        "also no em dashes in the summary",
+        "Review the plan with me before coding.",
+        "here is what they sent:\n> Please don't send anything until we approve it.\ndraft a reply for me",
+        "# Plan\nship the fix"
+      ],
+      "synthetic": 14,
+      "turns_with_automated": [
+        "don't push anything without asking me first",
+        "You are right, use the other branch.",
+        "also no em dashes in the summary",
+        "Review the plan with me before coding.",
+        "here is what they sent:\n> Please don't send anything until we approve it.\ndraft a reply for me",
+        "# Plan\nship the fix"
+      ]
+    },
+    {
+      "file": "codex/rollout-desktop-request.jsonl",
+      "skip": null,
+      "turns": [
+        "write the plan only, do not implement yet",
+        "keep AI names out of the commit message"
+      ],
+      "synthetic": 1,
+      "turns_with_automated": [
+        "write the plan only, do not implement yet",
+        "keep AI names out of the commit message"
+      ]
+    },
+    {
+      "file": "codex/rollout-subagent.jsonl",
+      "skip": "subagent",
+      "turns": [],
+      "turns_with_automated": []
+    },
+    {
+      "file": "codex/rollout-guardian.jsonl",
+      "skip": "subagent",
+      "turns": [],
+      "turns_with_automated": []
+    },
+    {
+      "file": "codex/rollout-thread-subagent.jsonl",
+      "skip": "subagent",
+      "turns": [],
+      "turns_with_automated": []
+    },
+    {
+      "file": "codex/rollout-thread-guardian.jsonl",
+      "skip": "subagent",
+      "turns": [],
+      "turns_with_automated": []
+    },
+    {
+      "file": "codex/rollout-exec.jsonl",
+      "skip": "automated",
+      "turns": [],
+      "turns_with_automated": [
+        "synthetic request in a skipped thread"
+      ]
+    },
+    {
+      "file": "codex/rollout-mcp.jsonl",
+      "skip": "automated",
+      "turns": [],
+      "turns_with_automated": [
+        "synthetic request in a skipped thread"
+      ]
+    },
+    {
+      "file": "codex/rollout-automation.jsonl",
+      "skip": "automated",
+      "turns": [],
+      "turns_with_automated": [
+        "synthetic request in a skipped thread"
+      ]
+    },
+    {
+      "file": "codex/rollout-forked.jsonl",
+      "skip": "forked_replay",
+      "turns": [],
+      "turns_with_automated": []
+    },
+    {
+      "file": "codex/rollout-forked-subagent.jsonl",
+      "skip": "forked_replay",
+      "turns": [],
+      "turns_with_automated": []
+    },
+    {
+      "file": "codex/rollout-no-header.jsonl",
+      "skip": null,
+      "turns": [
+        "synthetic request with no header"
+      ],
+      "synthetic": 0,
+      "turns_with_automated": [
+        "synthetic request with no header"
+      ]
+    }
+  ],
+  "claude": [
+    {
+      "file": "claude/-work-project/golden-claude-main.jsonl",
+      "turns": [
+        "first synthetic operator request",
+        "stop adding co-authored-by trailers",
+        "typed in the IDE",
+        "the last synthetic operator request"
+      ],
+      "synthetic": 10,
+      "sidechain": 1,
+      "automated": 2,
+      "turns_with_automated": [
+        "first synthetic operator request",
+        "stop adding co-authored-by trailers",
+        "typed in the IDE",
+        "scripted prompt with no entrypoint",
+        "scripted sdk-ts prompt",
+        "the last synthetic operator request"
+      ]
+    },
+    {
+      "file": "claude/-work-project/golden-claude-sdk.jsonl",
+      "turns": [],
+      "synthetic": 0,
+      "sidechain": 0,
+      "automated": 2,
+      "turns_with_automated": [
+        "You are helping with a scripted task. List the files.",
+        "scripted follow-up"
+      ]
+    },
+    {
+      "file": "claude/-work-project/golden-claude-main/subagents/agent-1.jsonl",
+      "refused": "subagent_transcript"
+    }
+  ]
+}

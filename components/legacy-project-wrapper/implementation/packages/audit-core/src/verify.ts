@@ -42,8 +42,18 @@ const PERSON_SUBJECT = new RegExp(
   "i",
 );
 
+/** True when `text` asks the person to change how they work or give feedback (R7). Shared with the local report. */
+export const personSubject = (text: string) => PERSON_SUBJECT.test(text);
+
+/** True when the text opens with a description rather than an action (R4). Shared with the local report. */
+export const notAnAction = (text: string) => {
+  const first = text.trim().split(/(?<=[.!?])\s/)[0] ?? "";
+  const w = (first.match(/[A-Za-z']+/)?.[0] ?? "").toLowerCase();
+  return !w || NOT_AN_ACTION.has(w);
+};
+
 /** True when `text` carries a number of its own: a digit outside a placeholder or a known run id, or a number word. */
-function carriesNumber(text: string, runIds: Set<string>): boolean {
+export function carriesNumber(text: string, runIds: Set<string>): boolean {
   const stripped = text
     .replace(/\{[a-z_]+\}/g, " ")
     .replace(/\b[A-Za-z]+\d+[a-z]?\b/g, (tok) => (runIds.has(tok.toUpperCase()) ? " " : tok));

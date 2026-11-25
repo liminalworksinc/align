@@ -1,0 +1,41 @@
+{"timestamp":"2026-08-25T11:59:00Z","type":"session_meta","payload":{"id":"golden-codex-cli","session_id":"golden-codex-cli","timestamp":"2026-08-25T11:59:00Z","cwd":"/work/project","originator":"codex-tui","cli_version":"0.99.0","source":"cli","base_instructions":{"text":"synthetic base instructions"},"thread_source":"user"}}
+{"timestamp":"2026-08-25T12:00:16Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","started_at":1}}
+{"timestamp":"2026-08-25T12:00:17Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /work/project\n\n<INSTRUCTIONS>synthetic</INSTRUCTIONS>"},{"type":"input_text","text":"<environment_context>\n  <cwd>/work/project</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-08-25T12:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<INSTRUCTIONS>synthetic instructions</INSTRUCTIONS>"}]}}
+{"timestamp":"2026-08-25T12:00:03Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<ENVIRONMENT>synthetic</ENVIRONMENT>"}]}}
+{"timestamp":"2026-08-25T12:00:04Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<in-app-browser-context>synthetic page</in-app-browser-context>"}]}}
+{"timestamp":"2026-08-25T12:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<subagent_notification>synthetic</subagent_notification>"}]}}
+{"timestamp":"2026-08-25T12:00:06Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<heartbeat>synthetic</heartbeat>"}]}}
+{"timestamp":"2026-08-25T12:00:07Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>synthetic</user_instructions>"}]}}
+{"timestamp":"2026-08-25T12:00:08Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context>synthetic</codex_internal_context>"}]}}
+{"timestamp":"2026-08-25T12:00:09Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<turn_aborted>synthetic</turn_aborted>"}]}}
+{"timestamp":"2026-08-25T12:00:10Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"[Request interrupted by user for tool use]"}]}}
+{"timestamp":"2026-08-25T12:00:11Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"You are a senior code reviewer for this repository."}]}}
+{"timestamp":"2026-08-25T12:00:12Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review the diff and list blocking issues."}]}}
+{"timestamp":"2026-08-25T12:00:13Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Audit this PR for regressions."}]}}
+{"timestamp":"2026-08-25T12:00:14Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"This session is being continued from a previous conversation that ran out of context."}]}}
+{"timestamp":"2026-08-25T12:00:15Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"don't push anything without asking me first"}]}}
+{"timestamp":"2026-08-25T12:00:18Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:19Z","type":"event_msg","payload":{"type":"task_complete"}}
+{"timestamp":"2026-08-25T12:00:20Z","type":"event_msg","payload":{"type":"user_message","message":"synthetic echo"}}
+{"timestamp":"2026-08-25T12:00:21Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}"}}
+{"timestamp":"2026-08-25T12:00:22Z","type":"response_item","payload":{"type":"function_call_output","output":"synthetic output"}}
+{"timestamp":"2026-08-25T12:00:26Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2","started_at":1}}
+{"timestamp":"2026-08-25T12:00:27Z","type":"turn_context","payload":{"turn_id":"turn-2","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:23Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"You are right, use the other branch."}]}}
+{"timestamp":"2026-08-25T12:00:24Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<system-reminder>synthetic</system-reminder>"},{"type":"input_text","text":"  also no em dashes in the summary  "}]}}
+{"timestamp":"2026-08-25T12:00:25Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review the plan with me before coding."}]}}
+{"timestamp":"2026-08-25T12:00:28Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:29Z","type":"event_msg","payload":{"type":"task_complete"}}
+{"timestamp":"2026-08-25T12:00:31Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-3","started_at":1}}
+{"timestamp":"2026-08-25T12:00:32Z","type":"turn_context","payload":{"turn_id":"turn-3","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:30Z","type":"response_item","payload":{"type":"message","message":{"role":"user","content":[{"type":"input_text","text":"here is what they sent:\n> Please don't send anything until we approve it.\ndraft a reply for me"}]}}}
+{"timestamp":"2026-08-25T12:00:33Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:34Z","type":"event_msg","payload":{"type":"task_complete"}}
+{"timestamp":"2026-08-25T12:00:35Z","type":"compacted","payload":{"message":"synthetic summary","replacement_history":[{"type":"message","role":"user","content":[{"type":"input_text","text":"replayed request"}]}]}}
+{"timestamp":"2026-08-25T12:00:37Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-4","started_at":1}}
+{"timestamp":"2026-08-25T12:00:38Z","type":"turn_context","payload":{"turn_id":"turn-4","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:36Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# Plan\nship the fix"}]}}
+{"timestamp":"2026-08-25T12:00:39Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:40Z","type":"event_msg","payload":{"type":"task_complete"}}

@@ -1,0 +1,6 @@
+{"timestamp":"2026-08-25T11:59:00Z","type":"session_meta","payload":{"id":"golden-codex-forked-subagent","session_id":"golden-codex-forked-subagent","timestamp":"2026-08-25T11:59:00Z","cwd":"/work/project","originator":"codex-tui","cli_version":"0.99.0","source":{"subagent":{"thread_spawn":{}}},"base_instructions":{"text":"synthetic base instructions"},"thread_source":"subagent","forked_from_id":"019a0000-0000-7000-8000-0000000000ff"}}
+{"timestamp":"2026-08-25T12:00:42Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","started_at":1}}
+{"timestamp":"2026-08-25T12:00:43Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/work/project","model":"m"}}
+{"timestamp":"2026-08-25T12:00:41Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"synthetic request in a skipped thread"}]}}
+{"timestamp":"2026-08-25T12:00:44Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic reply"}]}}
+{"timestamp":"2026-08-25T12:00:45Z","type":"event_msg","payload":{"type":"task_complete"}}
