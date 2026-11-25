@@ -58,5 +58,8 @@ test("the single-file bundle builds and imports no network module", () => {
     const imports = readFileSync(out, "utf8").split("\n").filter((l) => l.startsWith("import "));
     assert.deepEqual(imports.map((l) => l.match(/"([^"]+)"/)![1]).sort(), ["node:child_process", "node:crypto", "node:fs", "node:os", "node:path"]);
     execFileSync(process.execPath, ["--check", out]);
+    // The version gate runs before any module body, so an old Node gets a plain message instead of a crash.
+    const src = readFileSync(out, "utf8");
+    assert.ok(src.indexOf("Node 18 or later") < src.indexOf("// ---- rules.ts ----"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

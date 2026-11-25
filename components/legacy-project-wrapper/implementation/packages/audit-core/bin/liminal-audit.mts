@@ -29,7 +29,20 @@ if (!sessions.length) {
   console.log(`No coding-agent sessions found in the last ${days} days (looked in ~/.claude/projects and ~/.codex/sessions). Nothing written.`);
   process.exit(0);
 }
-const m = measure(sessions, (s) => sessionOutcomeAcross(s.cwd, s.touched, s.turns[0].at, s.activity.at(-1) ?? s.turns.at(-1)!.at, s.ownCommits).outcome);
+const reposRead = new Set<string>();
+const m = measure(sessions, (s) => {
+  const o = sessionOutcomeAcross(s.cwd, s.touched, s.turns[0].at, s.activity.at(-1) ?? s.turns.at(-1)!.at, s.ownCommits);
+  for (const r of (o.repo ?? "").split(", ").filter(Boolean)) reposRead.add(r);
+  return o.outcome;
+});
+
+// What this run read and skipped, so the person can see it stayed on their machine.
+const skipped = Object.entries(diagnostics.skipped).filter(([, n]) => n > 0).map(([why, n]) => `${n} ${why.replace(/_/g, " ")}`);
+console.log(`\nWhat this read (on this computer only; no network connection was made):`);
+console.log(`- Session logs in ~/.claude/projects and ~/.codex/sessions from the last ${days} days: ${diagnostics.filesSeen} files looked at, ${diagnostics.sessionsRead} sessions read.`);
+console.log(`- Skipped: ${skipped.length ? skipped.join(", ") : "none"}.${diagnostics.malformedLines ? ` ${diagnostics.malformedLines} unreadable lines ignored.` : ""}`);
+console.log(`- Git history, read-only, in ${reposRead.size} ${reposRead.size === 1 ? "repository" : "repositories"} those sessions worked in. Nothing was changed or fetched.`);
+console.log(`- Your agent instruction files (CLAUDE.md, AGENTS.md), only to count whether a rule is already written there.`);
 const corr = new Set<string>();
 for (const s of sessions) for (const c of corrections(s)) corr.add(`${s.id}:${c.index}`);
 const discovered = discoverRules(sessions, (id, i) => corr.has(`${id}:${i}`));
@@ -68,7 +81,8 @@ if (findings.length || headerFindings.length) {
   process.exit(2);
 }
 
-const stamp = new Date().toISOString().slice(0, 10);
+const now = new Date();
+const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; // local date, as the person sees it
 const path = join(outDir, `liminal-audit-${stamp}.json`);
 writeFileSync(path, serialized + "\n");
 console.log(`\n${DISCOVERY_CAVEAT}`);

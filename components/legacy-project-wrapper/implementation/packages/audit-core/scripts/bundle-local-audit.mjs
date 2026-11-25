@@ -41,8 +41,13 @@ for (const mod of MODULES) {
 const entrySrc = stripTypeScriptTypes(readFileSync(join(ROOT, "bin/liminal-audit.mts"), "utf8"), { mode: "strip" });
 const entry = rewrite(entrySrc.replace(/from "\.\.\/src\/local\//g, 'from "./'), "liminal-audit.mts");
 
+// Version gate, evaluated before any module body runs (node: imports are safe on any supported Node). Newest feature
+// used: Array.prototype.at (Node 16.6); gated at 18, the oldest LTS line. Tested on Node 26 only.
+const gate = `const __major = Number(process.versions.node.split(".")[0]);
+if (__major < 18) { console.error("This needs Node 18 or later; you have " + process.versions.node + ". Install a current Node from https://nodejs.org and run it again. Nothing was read."); process.exit(1); }
+`;
 const header = `#!/usr/bin/env node\n// Liminal local audit, bundled ${new Date().toISOString().slice(0, 10)} from align packages/audit-core. Read-only; no network call.\n`;
 const imports = [...nodeImports].sort().map((m) => `import * as ${v(m)} from "${m}";`).join("\n");
 mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, `${header}${imports}\n${body}\n// ---- liminal-audit.mts ----\n${entry}\n`);
+writeFileSync(out, `${header}${imports}\n${gate}${body}\n// ---- liminal-audit.mts ----\n${entry}\n`);
 console.log(`wrote ${out}`);
