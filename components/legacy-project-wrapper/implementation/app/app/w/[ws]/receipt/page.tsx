@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { standInReceipt, transferPreviewEnabled } from "@/lib/v2/transfer-preview";
+import { standInOutbox, transferPreviewEnabled } from "@/lib/v2/transfer-preview";
 import { inWorkspace, requireUser } from "../../../_ui/server";
 import { NotInWorkspace } from "../../../_ui/missing";
 import { Loading } from "../sessions/parts";
@@ -17,5 +17,5 @@ async function Inner({ params }: { params: PageProps<"/app/w/[ws]/receipt">["par
   // Checked per request, after the sign-in read makes this dynamic: checked outside it, the build bakes in its value.
   if (!transferPreviewEnabled()) notFound();
   if (!(await inWorkspace(me, ws))) return <NotInWorkspace me={me} />;
-  return <Receipt me={me} ws={ws} rows={standInReceipt()} />;
+  return <Receipt me={me} ws={ws} items={standInOutbox()} />;
 }

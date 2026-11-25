@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PRESETS, standInOutbox, standInReceipt, transferPreviewEnabled } from "../lib/v2/transfer-preview.ts";
+import { AGENT_APPROVE_ATTEMPT, PRESETS, receiptFrom, standInOutbox, transferPreviewEnabled } from "../lib/v2/transfer-preview.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0;
@@ -40,16 +40,29 @@ for (const page of ["outbox", "receipt"]) {
 const now = Date.parse("2026-11-25T22:00:00Z");
 const items = standInOutbox(now, "team");
 check("every outbox item expires 72 hours after it is made (founder ruling)", items.every((i) => Date.parse(i.expiresAt) - now === 72 * 3_600_000));
-check("an excerpt never offers Always: each excerpt needs its author", items.filter((i) => i.capability === "excerpt").every((i) => !i.canAlways && i.authorsWords));
+check("an excerpt never offers Always: each excerpt needs its author", items.filter((i) => i.capability === "excerpt").every((i) => !i.canAlways));
 check("a vendor send names its recipient and shows the on-machine redaction line",
-  items.filter((i) => i.capability === "suggestion" || i.capability === "model_check").every((i) => i.recipient.label.length > 0 && /^Secrets removed on this machine first: /.test(i.redaction ?? "")));
+  items.filter((i) => i.capability === "suggestion" || i.capability === "model_check").every((i) => i.recipient.length > 0 && /^Secrets removed on this machine first: /.test(i.redaction ?? "")));
 check("under Regulated, a vendor send offers no Always", standInOutbox(now, "regulated").filter((i) => i.capability === "suggestion").every((i) => !i.canAlways));
 check("the ceiling presets are the mock's three, Regulated last", PRESETS.map((p) => p.id).join() === "private,team,regulated");
 
-const rows = standInReceipt(now);
-check("every receipt line names who allowed it", rows.every((r) => r.allowedBy.length > 0 && r.how.length > 0));
-check("a vendor send's undo stops future sends; it does not claim to recall the sent one", rows.filter((r) => r.vendor).every((r) => r.undo === "stop_future"));
-check("receipt lines are all from the last week", rows.every((r) => now - Date.parse(r.when) < 7 * 24 * 3_600_000));
+// The receipt follows the outbox (founder review, Nov 25: "link the receipt to the outbox").
+check("the receipt starts empty: nothing decided, nothing left", receiptFrom(items, {}, "Shruti").length === 0);
+const rows = receiptFrom(items, { ob_findings: "always", ob_excerpt: "no", ob_vendor: "once" }, "Shruti");
+check("allowed items appear on the receipt and \"Not this\" does not", rows.map((r) => r.id).join() === "ob_findings,ob_vendor");
+check("every receipt line names who allowed it and how", rows.every((r) => r.allowedBy === "Shruti")
+  && rows.find((r) => r.id === "ob_findings")?.how === "standing rule" && rows.find((r) => r.id === "ob_vendor")?.how === "allowed once");
+check("the vendor line is marked as a send to an outside model", rows.filter((r) => r.vendor).map((r) => r.id).join() === "ob_vendor");
+const receiptView = readFileSync(path.join(ROOT, "app/app/w/[ws]/receipt/view.tsx"), "utf8");
+check("undo on a vendor send says it can't be recalled (spec #117, honest undo)", /already sent and can’t be recalled/.test(receiptView));
+
+// The mock's wording (founder review, Nov 25: "use the mock's wording").
+const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+check("Always on findings uses the mock's confirmation", byId.ob_findings.confirm.always === "Rule added to “Onboarding v2”: agent findings are now visible to the team. Change it on the goal any time.");
+check("a waiting item never says it was sent", items.every((i) => !/^Sent\b/.test(i.note)));
+check("the excerpt note is the mock's", byId.ob_excerpt.note === "Your words: no “always” option. Each excerpt needs you.");
+check("the agent's attempt to approve for itself is refused in the mock's words", AGENT_APPROVE_ATTEMPT.answer === "→ refused: agents can ask, not approve. approvals happen in Align, signed in as a person.");
+check("every item shows the agent what it was told, for every state", items.every((i) => ["pending", "once", "always", "no"].every((s) => i.terminal[s].length > 0)));
 
 console.log(`\ntest-transfer-preview: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
