@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { mostlyRedacted, redactSecrets } from "./redact.ts";
 import type { Harness } from "./shared/types.ts";
 
 export const DECISION_PROVIDERS = {
@@ -192,7 +193,11 @@ function readAnswers(answers: unknown, provider: DecisionProvider, questions: Re
 export async function decideGoal(service: DecisionService, key: string, data: DecisionInput, timeout: number, send = fetch, dispatch?: DecisionDispatch): Promise<string | null> {
   if (!data.first_prompt.trim() || !data.goals.length || data.goals.length > 254 || !key || timeout <= 0) return null;
   const { provider } = service;
-  const context = JSON.stringify({ ...data, first_prompt: data.first_prompt.slice(0, 8_000) });
+  // Secrets are removed on this machine before any vendor send (spec #117, P0); a mostly-secret prompt is not sent.
+  const prompt = data.first_prompt.slice(0, 8_000);
+  const cleaned = redactSecrets(prompt);
+  if (mostlyRedacted(prompt, cleaned)) return null;
+  const context = JSON.stringify({ ...data, first_prompt: cleaned.text });
   const options = [...data.goals.map(({ id, title }) => [id, title] as const), ["none", "None of these goals clearly fits."] as const];
   const questions = { fit: { instructions: FIT }, goal: { instructions: CHOICE, options } };
   const answers = readAnswers(await askDecision(service, key, context, questions, timeout, send, 64 * 1024, dispatch), provider, questions);
@@ -222,7 +227,10 @@ export async function checkLimits(service: DecisionService, key: string, reply: 
     questions[`clear_${i}`] = { instructions: `${instructions} Is the evidence enough to decide clearly whether this reply crosses the limit?` };
     questions[`crosses_${i}`] = { instructions: `${instructions} Does the reply state that the agent will do or has done something that crosses the limit?`, options: limitChoices };
   }
-  const answers = readAnswers(await askDecision(service, key, reply, questions, timeout, fetch, 32_768, dispatch),
+  // Secrets are removed on this machine before any vendor send (spec #117, P0); a mostly-secret reply is not sent.
+  const cleaned = redactSecrets(reply);
+  if (mostlyRedacted(reply, cleaned)) return [];
+  const answers = readAnswers(await askDecision(service, key, cleaned.text, questions, timeout, fetch, 32_768, dispatch),
     service.provider, questions, true);
   if (!answers) return [];
   const crossed: number[] = [];
