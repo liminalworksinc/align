@@ -16,7 +16,7 @@ import { shortId } from "../src/shared/envelope.ts";
 import { readJson } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import { FakeServer } from "./fake-server.ts";
-import { ctxFor, HOOK, makeEnv, runCli, waitFor, type TestEnv } from "./helpers.ts";
+import { ctxFor, HOOK, makeEnv, runCli, runCliAsPerson, waitFor, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -96,7 +96,7 @@ async function shared(t: TestEnv, cwd: string, kind: Kind = "new", goal = "Ship 
   const s: S = { sid, lid: localId(harness, sid), key: "", kind, cwd };
   hook(t, s, "SessionStart", { source: "startup" });
   hook(t, s, "UserPromptSubmit", { prompt_id: `${sid}-p0`, prompt: "start" });
-  const r = await runCli(t, ["share", s.lid.slice(0, 8), "--workspace", "Acme", "--goal", goal, "--signals", "--yes"]);
+  const r = await runCliAsPerson(t, ["share", s.lid.slice(0, 8), "--workspace", "Acme", "--goal", goal, "--signals", "--yes"]);
   assert.equal(r.code, 0, r.stderr);
   const ctx = ctxFor(t);
   s.key = sessionKey(ctx.secret, "ws_acme", harness, sid);
@@ -355,7 +355,7 @@ describe("A2-local-7: a session a folder rule shares at its start counts from it
   test("its edits are recorded and held, and hold others, before any pass makes its share; the pass credits them to it", async () => {
     const { fake, t } = await world();
     const repo = gitRepo(t, "rule");
-    const rule = await runCli(t, ["share", "--dir", repo, "--workspace", "Acme", "--goal", "Ship the v2", "--signals", "--yes"]);
+    const rule = await runCliAsPerson(t, ["share", "--dir", repo, "--workspace", "Acme", "--goal", "Ship the v2", "--signals", "--yes"]);
     assert.equal(rule.code, 0, rule.stderr);
     await sync(t); // the git baseline
     const mk = (i: number): S => {
@@ -386,7 +386,7 @@ describe("A2-local-7: a session a folder rule shares at its start counts from it
   test("while the pass that made its share waits for the server to take it (pending), its edits are still recorded and held", async () => {
     const { fake, t } = await world();
     const repo = gitRepo(t, "pending");
-    const rule = await runCli(t, ["share", "--dir", repo, "--workspace", "Acme", "--goal", "Ship the v2", "--signals", "--yes"]);
+    const rule = await runCliAsPerson(t, ["share", "--dir", repo, "--workspace", "Acme", "--goal", "Ship the v2", "--signals", "--yes"]);
     assert.equal(rule.code, 0, rule.stderr);
     const S: S = { sid: "88888888-1111-2222-3333-444444444444", lid: localId("claude-code", "88888888-1111-2222-3333-444444444444"), key: "", kind: "new", cwd: repo };
     hook(t, S, "SessionStart", { source: "startup" });

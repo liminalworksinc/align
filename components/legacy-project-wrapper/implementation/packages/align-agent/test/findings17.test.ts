@@ -16,7 +16,7 @@ import { localId, layout } from "../src/shared/layout.ts";
 import * as sib from "../src/hooks/siblings.ts";
 import { readActs, shellWrites, type Act } from "../src/hooks/siblings.ts";
 import { FakeServer } from "./fake-server.ts";
-import { ctxFor, makeEnv, runCli, runHook, touch, type TestEnv } from "./helpers.ts";
+import { ctxFor, makeEnv, runCli, runCliAsPerson, runHook, touch, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -85,7 +85,7 @@ async function shared(t: TestEnv, cwd: string, h: "claude" | "codex" = "claude",
   const harness = h === "codex" ? "codex" : "claude-code";
   runHook(t, h, "SessionStart", { session_id: sid, source: "startup", cwd });
   runHook(t, h, "UserPromptSubmit", { session_id: sid, prompt_id: `${sid}-p0`, turn_id: `${sid}-t0`, prompt: "start", cwd });
-  const r = await runCli(t, ["share", localId(harness, sid).slice(0, 8), "--workspace", "Acme", "--goal", goal, "--signals", "--yes"]);
+  const r = await runCliAsPerson(t, ["share", localId(harness, sid).slice(0, 8), "--workspace", "Acme", "--goal", goal, "--signals", "--yes"]);
   assert.equal(r.code, 0, r.stderr);
   const ctx = ctxFor(t);
   const key = sessionKey(ctx.secret, "ws_acme", harness, sid);

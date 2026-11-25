@@ -15,7 +15,7 @@ import { enqueue } from "../src/share.ts";
 import { localId } from "../src/shared/layout.ts";
 import { ingestSpool, syncOnce } from "../src/sync.ts";
 import { FakeServer } from "./fake-server.ts";
-import { CLI, claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, usage, writeLines } from "./helpers.ts";
+import { CLI, claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runCliAsPerson, runHook, usage, writeLines } from "./helpers.ts";
 
 const PROMPT = "CANARY-FIRST-PROMPT";
 const REPLY = "CANARY-PRIVATE-REPLY";
@@ -71,9 +71,10 @@ async function setup(t: TestContext) {
   const env = makeEnv({ ALIGN_SERVER: fake.url, ALIGN_DEVICE_POLL_SCALE_MS: "10", ALIGN_DECISION_WORKSPACE_KEY: KEY });
   t.after(() => fake.stop());
   t.after(() => env.cleanup());
+  // Consent choices are a person's (spec #117), so data-sharing commands run at a terminal with no agent markers.
   const cli = async (...args: string[]) => {
-    const r = await runCli(env, args);
-    assert.equal(r.code, 0, r.stderr);
+    const r = args[0] === "data-sharing" ? await runCliAsPerson(env, args) : await runCli(env, args);
+    assert.equal(r.code, 0, r.stderr || r.stdout);
     return r.stdout;
   };
   await cli("login");
@@ -214,9 +215,9 @@ test("a decision provider gets only the opted-in fields and a current bindable g
   for (const command of ["::align share --signals g_ship confirm", "::align share --dir g_ship --yes"]) {
     assert.match(w.prompt(sid, command).reason, /preview/i);
   }
-  const terminal = await runCli(w.env, ["share", sid, "--goal", "g_ship", "--signals", "--yes"]);
+  const terminal = await runCliAsPerson(w.env, ["share", sid, "--goal", "g_ship", "--signals", "--yes"]);
   assert.notEqual(terminal.code, 0);
-  assert.match(terminal.stderr, /preview/i);
+  assert.match(terminal.stdout + terminal.stderr, /preview/i);
   await w.sync();
   assert.equal(w.epoch(sid), undefined);
   assert.match(w.prompt(sid, "::align share g_ship").reason, /Goal: Ship/);

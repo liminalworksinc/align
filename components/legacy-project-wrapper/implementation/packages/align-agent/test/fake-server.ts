@@ -119,6 +119,8 @@ export class FakeServer {
   reportEnded = true;
   /** DELETE …/sessions/{key} that went through, and the device that sent each (audited with the acting device). */
   deletedBy: { key: string; device: string }[] = [];
+  /** Every request body as sent, byte for byte (LIM-2529: proves what left the machine, not what the server kept). */
+  raw: { method: string; path: string; text: string }[] = [];
   /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
   activity: any[] = [];
   activitySeq = 0;
@@ -404,6 +406,7 @@ export class FakeServer {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
     const text = Buffer.concat(chunks).toString("utf8");
+    this.raw.push({ method: req.method || "", path: new URL(req.url || "/", "http://x").pathname, text });
     return text ? JSON.parse(text) : null;
   }
 
