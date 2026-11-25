@@ -251,7 +251,6 @@ excerpts-off refused after a local reset (server returns the next sequence), dec
 2. One grant per batch for named activity and findings; one per item for excerpts and vendor sends.
 3. `ALIGN_TRANSFER_CAPABILITIES` applies in Mode L too, default off, and a local operator can enable it.
 4. An outbox item expires after 72 hours ("use 72 hours"), and then the CLI drops the payload.
+5. A vendor payload that is mostly redactions is refused, not sent with a warning ("keep refusing mostly redacted").
 
-## Still open (the default stands until the founder changes it)
-
-5. A payload that is mostly redactions is refused, not sent with a warning.
+No questions remain open.
