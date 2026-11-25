@@ -2,7 +2,7 @@
 # Gate runner. Usage: scripts/test-all.sh <port>   (run from a worktree; test-v2 also uses <port>+1)
 # Runs in fixed order: lint, typecheck, syntax (node --check on every script), paste-lines, test-admin, invite-races and budgets (no server), test-v2,
 # test-oauth and test-agent-live (each starts its own production servers on <port>; the last two reuse the build test-v2
-# made), then the align-agent package tests.
+# made), then the align-agent and audit-core package tests.
 # One summary line per step; exits non-zero if any step fails.
 set -u
 
@@ -36,6 +36,8 @@ step paste-lines node scripts/test-paste-lines.mjs
 step test-admin node scripts/test-admin.mjs
 step invite-races node scripts/test-invite-races.mjs
 step budgets node scripts/test-budgets.mjs
+# The agent audit's server path: consent, verification, nothing stored (no server, no network, fake models only).
+step test-audit node scripts/test-audit.mjs
 
 # ---- servers: each test starts its own production servers on <port> ----
 # The v2 server (docs/v2/WIRE.md): Mode L sign-in and local owner, the edge, Mode L with the test identity provider, hosted.
@@ -48,6 +50,8 @@ step test-agent-live node scripts/test-agent-live.mjs "$PORT" --no-build
 
 # ---- the local agent package ----
 step align-agent bash -c 'cd packages/align-agent && { [ -d node_modules ] || npm ci; } && npm test' # a fresh copy has no node_modules
+# The agent audit's pure core (schema, parser, numbers, verifier, redaction): no dependencies, no network.
+step audit-core bash -c 'cd packages/audit-core && npm test'
 
 # ---- one node:test-style total (so `npm test` reports an exact count to tools that read it, e.g. litai) ----
 # Each static step counts as one test; paste-lines, test-admin, invite-races, budgets, test-v2, test-oauth, test-agent-live and align-agent contribute their
@@ -66,12 +70,17 @@ count "$LOGDIR/test-oauth.log" '^test-oauth: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/paste-lines.log" '^test-paste-lines: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-admin.log" '^test-admin: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/budgets.log" '^test-budgets: ([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/test-audit.log" '^test-audit: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/invite-races.log" '^test-invite-races: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-agent-live.log" '^([0-9]+) passed, ([0-9]+) failed$'
 AGENT_PASS="$(grep -Eo '^(#|ℹ) pass [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
 AGENT_FAIL="$(grep -Eo '^(#|ℹ) fail [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
 if [ "$AGENT_PASS" -eq 0 ]; then TOTAL_FAIL=$((TOTAL_FAIL + 1)); fi
 TOTAL_PASS=$((TOTAL_PASS + AGENT_PASS)); TOTAL_FAIL=$((TOTAL_FAIL + AGENT_FAIL))
+AUDIT_PASS="$(grep -Eo '^(#|ℹ) pass [0-9]+' "$LOGDIR/audit-core.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
+AUDIT_FAIL="$(grep -Eo '^(#|ℹ) fail [0-9]+' "$LOGDIR/audit-core.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
+if [ "$AUDIT_PASS" -eq 0 ]; then TOTAL_FAIL=$((TOTAL_FAIL + 1)); fi
+TOTAL_PASS=$((TOTAL_PASS + AUDIT_PASS)); TOTAL_FAIL=$((TOTAL_FAIL + AUDIT_FAIL))
 echo
 echo "ℹ tests $((TOTAL_PASS + TOTAL_FAIL))"
 echo "ℹ pass $TOTAL_PASS"
