@@ -20,7 +20,7 @@ import { commitSubject, pathHash, repoIdentity, shellWrites, type Act } from "..
 import * as envelope from "../src/shared/envelope.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import { FakeServer } from "./fake-server.ts";
-import { claudeAssistant, claudeUser, ctxFor, HOOK, makeEnv, runCli, runHook, usage, writeLines, type TestEnv } from "./helpers.ts";
+import { claudeAssistant, claudeUser, ctxFor, HOOK, makeEnv, runCli, runCliAsPerson, runHook, usage, writeLines, type TestEnv } from "./helpers.ts";
 
 // Read loosely, so this file runs (and fails test by test) against the agent before these fixes.
 const { renderCard } = envelope;
@@ -103,7 +103,7 @@ async function shared(t: TestEnv, cwd: string, kind: Kind = "new", goal = "Ship 
   const s = session(cwd, kind, sid);
   hook(t, s, "SessionStart", { source: "startup" });
   hook(t, s, "UserPromptSubmit", { prompt_id: `${s.sid}-p0`, prompt: "start" });
-  const r = await runCli(t, ["share", s.lid.slice(0, 8), "--workspace", "Acme", "--goal", goal, "--signals", "--yes"]);
+  const r = await runCliAsPerson(t, ["share", s.lid.slice(0, 8), "--workspace", "Acme", "--goal", goal, "--signals", "--yes"]);
   assert.equal(r.code, 0, r.stderr);
   const ctx = ctxFor(t);
   s.key = sessionKey(ctx.secret, "ws_acme", harnessOf(s), s.sid);

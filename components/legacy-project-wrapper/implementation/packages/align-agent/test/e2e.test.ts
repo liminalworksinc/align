@@ -420,7 +420,7 @@ describe("e2e", () => {
     };
     const named = mkRepo("app");
     const hashed = mkRepo("infra");
-    const on = await runCli(t, ["share", "--dir", named, "--workspace", "ws_acme", "--goal", "g_ship", "--signals", "--yes"]);
+    const on = await runCliAsPerson(t, ["share", "--dir", named, "--workspace", "ws_acme", "--goal", "g_ship", "--signals", "--yes"]);
     assert.equal(on.code, 0, on.stderr);
     assert.match(on.stdout, /Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name/);
     assert.match(on.stdout, /Never sent: prompts, responses, tool input or output\./);
@@ -1418,7 +1418,7 @@ test("activity rechecks consent after refresh and retries a rejected name as a h
   fs.writeFileSync(path.join(git, "HEAD"), "ref: refs/heads/main\n");
   runHook(t, "claude", "SessionStart", { session_id: sid, cwd: t.root, source: "startup" });
   await syncOnce(ctx, { tailBudgetMs: 200 });
-  assert.equal((await runCli(t, ["share", sid, "--goal", "g_ship", "--signals", "--yes"])).code, 0);
+  assert.equal((await runCliAsPerson(t, ["share", sid, "--goal", "g_ship", "--signals", "--yes"])).code, 0);
   const file = path.join(t.root, "PRIVATE-PATH-CANARY");
   fs.writeFileSync(file, "test data");
   const add = () => record(t.home, lid, [{ t: "edit", p: file, at: new Date().toISOString(), g: "g_ship", via: "git" }]);

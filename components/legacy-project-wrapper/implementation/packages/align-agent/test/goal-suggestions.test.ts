@@ -215,9 +215,9 @@ test("a decision provider gets only the opted-in fields and a current bindable g
   for (const command of ["::align share --signals g_ship confirm", "::align share --dir g_ship --yes"]) {
     assert.match(w.prompt(sid, command).reason, /preview/i);
   }
-  const terminal = await runCli(w.env, ["share", sid, "--goal", "g_ship", "--signals", "--yes"]);
+  const terminal = await runCliAsPerson(w.env, ["share", sid, "--goal", "g_ship", "--signals", "--yes"]);
   assert.notEqual(terminal.code, 0);
-  assert.match(terminal.stderr, /preview/i);
+  assert.match(terminal.stdout + terminal.stderr, /preview/i);
   await w.sync();
   assert.equal(w.epoch(sid), undefined);
   assert.match(w.prompt(sid, "::align share g_ship").reason, /Goal: Ship/);

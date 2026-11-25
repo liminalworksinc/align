@@ -1016,6 +1016,10 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
     past: { type: "string" },
     yes: { type: "boolean", short: "y" },
   });
+  // `share --yes` needs no person (founder ruling, Nov 25), on condition that it shares metadata only. `--signals` turns
+  // on naming edited files, which is above metadata, so it takes the same person check as `data-sharing signals on`;
+  // before this, an agent's `share --signals --yes` uploaded file names (found by test/share-yes-metadata.test.ts).
+  if (values.signals) needPerson("Work signals");
   await needLogin(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
   let past: number | null = null;
