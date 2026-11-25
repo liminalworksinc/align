@@ -1,6 +1,8 @@
 # Transfer authorization (LIM-2529)
 
-Status: **Proposed. Founder ratification is pending.** Nothing in this spec is built. When ratified, it replaces the
+Status: **Ratified by the founder, Wed Nov 25, 2026** ("1. yes with hooks 2. yes 3. yes diagnose", relayed by the
+reconciliation session), with the hooks below. Sean's review of the server half comes before any build. Merging, building,
+deploying and releasing each need a separate go. Nothing in this spec is built. When ratified, it replaces the
 dispatch-window mechanism added by PRs 104, 107, 108 and 110 (migration 35's `v2_model_send_windows` and its
 blocking triggers) and closes the findings listed in [Findings this spec closes](#findings-this-spec-closes).
 
@@ -36,7 +38,7 @@ unconsumed authorization when anything that could change the answer changes.
 | Capability | Tier | Recipient | What the digest covers |
 | --- | --- | --- | --- |
 | `activity_names` | 1 | Align | The canonical body of one `POST .../activity` batch |
-| `finding` | 2 | Align (Mode L only) | The canonical `Wire` body of one `POST .../analysis` |
+| `finding` | 2 | Align (Mode L only) | The canonical list of `Wire` bodies sent in one flush (one grant per batch; each `POST .../analysis` in the batch carries it, and the grant is consumed when the last one is written) |
 | `finding_delete` | 2 | Align | The canonical query of one `DELETE .../analysis` |
 | `model_check` | 3 | Workspace decision service | The canonical request body sent to the service |
 | `suggestion` | 3 | Chosen provider (workspace, typesafe, openai, google) | The canonical request body sent to the provider |
@@ -98,6 +100,10 @@ session, the redacted preview the CLI submitted, its digest and an expiry of 24 
 item so that one grant for exactly that digest can be issued within its expiry; **Always for this goal** also creates a
 standing rule; **Not this** closes it. The CLI SHALL keep the payload until the item is decided or expires, then send it
 under a grant or drop it. An agent's own request can therefore wait for a person, but can never decide.
+
+When the refusal is because of the **ceiling**, the server SHALL also record an outbox item for the workspace owner: a
+request to allow that capability and recipient at the ceiling. The owner's "allow" only widens the ceiling. The author
+still decides about their own content, through their own item, which stays open until the ceiling allows it or it expires.
 
 ### Requirement: Every transfer is logged for the receipt
 
@@ -239,12 +245,13 @@ From the Nov 25 independent review (LIM-2529 comment): agent self-consent (A per
 excerpts-off refused after a local reset (server returns the next sequence), decision service changes without recent sign-in
 (recent sign-in, public HTTPS host).
 
-## Questions for the founder
+## Decided (founder, Nov 25)
 
-1. Grant lifetime: 60 seconds. Shorter reduces exposure for direct sends; longer tolerates slow providers.
-2. Grant granularity: per batch for named activity and findings; per item for excerpts and vendor sends (the coordinator's
-   recommendation).
-3. `ALIGN_TRANSFER_CAPABILITIES` applies in Mode L too, default off, and a local operator can enable it (the coordinator's
-   recommendation).
-4. Outbox item expiry: 24 hours. After that the CLI drops the payload.
-5. Redaction ships as P0. Is a payload that is mostly redacted refused (as written), or sent with a warning?
+1. A grant lives 60 seconds.
+2. One grant per batch for named activity and findings; one per item for excerpts and vendor sends.
+3. `ALIGN_TRANSFER_CAPABILITIES` applies in Mode L too, default off, and a local operator can enable it.
+
+## Still open (defaults stand until the founder changes them)
+
+4. An outbox item expires after 24 hours, and then the CLI drops the payload.
+5. A payload that is mostly redactions is refused, not sent with a warning.
