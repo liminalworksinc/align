@@ -95,7 +95,7 @@ rule's outstanding grants.
 
 When a grant is refused only because no consent or standing rule covers it (not for the ceiling, a role, a block or a
 mismatch), the server SHALL record an outbox item for the author. The item holds the capability, recipient record, goal,
-session, the redacted preview the CLI submitted, its digest and an expiry of 24 hours. The response SHALL be
+session, the redacted preview the CLI submitted, its digest and an expiry of 72 hours. The response SHALL be
 `202 awaiting_author` with the item id, not a bare `403`. The author decides in the browser: **Allow once** marks the
 item so that one grant for exactly that digest can be issued within its expiry; **Always for this goal** also creates a
 standing rule; **Not this** closes it. The CLI SHALL keep the payload until the item is decided or expires, then send it
@@ -250,8 +250,8 @@ excerpts-off refused after a local reset (server returns the next sequence), dec
 1. A grant lives 60 seconds.
 2. One grant per batch for named activity and findings; one per item for excerpts and vendor sends.
 3. `ALIGN_TRANSFER_CAPABILITIES` applies in Mode L too, default off, and a local operator can enable it.
+4. An outbox item expires after 72 hours ("use 72 hours"), and then the CLI drops the payload.
 
-## Still open (defaults stand until the founder changes them)
+## Still open (the default stands until the founder changes it)
 
-4. An outbox item expires after 24 hours, and then the CLI drops the payload.
 5. A payload that is mostly redactions is refused, not sent with a warning.
