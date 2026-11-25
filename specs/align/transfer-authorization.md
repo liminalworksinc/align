@@ -158,7 +158,9 @@ decision service revision, or a provider id.
 
 The server SHALL issue a grant only when, in one transaction: the capability is released; the device is current and not
 revoked; the person holds the needed role and owns the session; the session is shared; the tier is not restricted; the
-device's consent for the capability is on at `consent_seq`; for `workspace` the decision service revision matches; and
+device's consent for the capability is on at `consent_seq` and, for `excerpt`, `model_check` and `suggestion`, the author's
+standing rule or an allowed outbox item for exactly this digest matches; the ceiling allows the capability and recipient;
+for `workspace` the decision service revision matches; and
 the per-capability rules already in local-agent.md hold. It SHALL record the grant with a random 128-bit id, the device,
 workspace, session, capability, digest, recipient, the policy revision and consent sequence at issue, an expiry of
 60 seconds, and state `issued`. Grants SHALL be rate-limited to 60 per device per minute per workspace.
