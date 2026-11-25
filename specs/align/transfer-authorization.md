@@ -46,7 +46,66 @@ Out of scope, with reasons: command measure readings and budget-request reasons 
 actions already covered by Goals and Proposals and Budgets. The Level 1 session fork has no caller; it SHALL NOT be
 given a caller without a capability row here. Tier 0 traffic needs no grant.
 
+## Who decides: four layers (founder ruling, Nov 25)
+
+Outside model vendors are part of the product ("we need outside vendors, otherwise no point"), so `model_check` and
+`suggestion` to a fixed provider stay. The founder's clickable mock (her design canvas, private) sets four layers. This spec
+gives each a server rule:
+
+| Layer | Who sets it | What it can do | Server rule |
+| --- | --- | --- | --- |
+| 1. Ceiling | Workspace owner, as a preset | Only narrow: switch a capability or recipient off for everyone. The Regulated preset turns vendor sends off | Grants check it; it never turns anything on |
+| 2. Goal default | The author, when the goal is approved | A standing rule: "always allow" a capability and recipient for sessions bound to that goal | A **standing rule** (below) |
+| 3. Moment | The author, in their outbox | Allow once / Always for this goal / Not this | An **outbox item** decided in the browser |
+| 4. Receipt | Everyone sees their own; the owner sees counts | A weekly list of every transfer, with undo where undo is possible | The **transfer log** (below) |
+
+**Only the author decides about their own content.** The author is the person whose session the content comes from. For
+`excerpt`, `model_check` and `suggestion`, consent, standing rules and outbox decisions SHALL come from that person only.
+An owner or anyone else SHALL NOT consent for them, whatever the ceiling allows. An owner can only narrow.
+
 ## Requirements
+
+### Requirement: Secrets are removed on the machine before any vendor send (P0)
+
+Before computing the digest for a `model_check` or `suggestion` to any recipient other than Align, the CLI SHALL redact
+secrets from the payload on the machine. That covers known token formats, private keys, `.env`-style assignments and
+high-entropy strings, replaced by `[redacted]`. The digest, the request and the preview SHALL all be the redacted text. The
+outbox and the receipt SHALL state "secrets removed on this machine first" and the number of redactions. A payload that
+is mostly redactions (more than half its characters) SHALL NOT be sent. Redaction SHALL have its own test corpus, and a
+missed pattern is a release blocker.
+
+### Requirement: The recipient is named on every grant
+
+Each grant SHALL carry a recipient record: the provider, the account it is sent under, and the retention it states.
+For example: "Claude via Anthropic, under Liminal's account, not kept after the answer". The workspace decision service
+is named by its owner-set address and revision. The outbox, the standing rule and the receipt SHALL show this record.
+A change to a provider's record SHALL void standing rules that named the old one.
+
+### Requirement: A person's standing rule issues grants without a click
+
+A standing rule is `{author, workspace, goal (or "all my sessions"), capability, recipient}`. Only the author creates it,
+in the browser with a recent sign-in, from a goal default or "Always for this goal". It never comes from a device token.
+While a rule matches and the ceiling allows it, a grant request SHALL be issued with no further click. Every other check
+in this spec still applies. The author can remove a rule at any time from the receipt or the goal; removal voids that
+rule's outstanding grants.
+
+### Requirement: A refused request becomes an outbox item
+
+When a grant is refused only because no consent or standing rule covers it (not for the ceiling, a role, a block or a
+mismatch), the server SHALL record an outbox item for the author. The item holds the capability, recipient record, goal,
+session, the redacted preview the CLI submitted, its digest and an expiry of 24 hours. The response SHALL be
+`202 awaiting_author` with the item id, not a bare `403`. The author decides in the browser: **Allow once** marks the
+item so that one grant for exactly that digest can be issued within its expiry; **Always for this goal** also creates a
+standing rule; **Not this** closes it. The CLI SHALL keep the payload until the item is decided or expires, then send it
+under a grant or drop it. An agent's own request can therefore wait for a person, but can never decide.
+
+### Requirement: Every transfer is logged for the receipt
+
+Each consumed or redeemed grant SHALL add a transfer log row: author, workspace, goal, capability, recipient record,
+time, byte count and redaction count, never the content. The weekly receipt lists the author's rows. Undo SHALL delete
+stored excerpts and findings and remove standing rules. For a vendor send, undo SHALL say plainly that the request was
+already sent and can't be recalled, and offer to stop future ones. Owners see counts per capability and recipient, not
+other authors' rows.
 
 ### Requirement: Released only when switched on
 
@@ -63,8 +122,8 @@ capabilities they release.
 
 ### Requirement: A person turns consent on
 
-Turning any tier 1 to 4 consent **on**, for a device or a session, SHALL require a browser request from the device's
-signed-in owner with a sign-in in the last 15 minutes (`requireRecentSignIn`). A device token SHALL NOT turn a consent
+Turning any tier 1 to 4 consent **on**, for a device or a session, SHALL require a browser request from the content's
+author (the device's signed-in owner) with a sign-in in the last 15 minutes (`requireRecentSignIn`). A device token SHALL NOT turn a consent
 on. A device token MAY turn a consent **off**. Changing a workspace restriction or the decision service address SHALL
 also require a recent sign-in, and the decision service address SHALL be a public HTTPS host.
 
@@ -181,5 +240,9 @@ excerpts-off refused after a local reset (server returns the next sequence), dec
 ## Questions for the founder
 
 1. Grant lifetime: 60 seconds. Shorter reduces exposure for direct sends; longer tolerates slow providers.
-2. Named activity: one grant per batch of up to 200 items (one extra request per batch). Alternative: per item.
-3. Should `ALIGN_TRANSFER_CAPABILITIES` exist in Mode L too (recommended, same default off), or only in hosted Align?
+2. Grant granularity: per batch for named activity and findings; per item for excerpts and vendor sends (the coordinator's
+   recommendation).
+3. `ALIGN_TRANSFER_CAPABILITIES` applies in Mode L too, default off, and a local operator can enable it (the coordinator's
+   recommendation).
+4. Outbox item expiry: 24 hours. After that the CLI drops the payload.
+5. Redaction ships as P0. Is a payload that is mostly redacted refused (as written), or sent with a warning?
