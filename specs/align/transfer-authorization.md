@@ -6,9 +6,16 @@ deploying and releasing each need a separate go. Nothing in this spec is built. 
 dispatch-window mechanism added by PRs 104, 107, 108 and 110 (migration 35's `v2_model_send_windows` and its
 blocking triggers) and closes the findings listed in [Findings this spec closes](#findings-this-spec-closes).
 
-Built as a pair (founder ruling, Nov 25, 2026): **server side**, Sean; **agent side and tests**, the audit build lane.
-Each side is reviewed by someone who did not write it. This spec is the contract both build to; a change to it needs
-the founder's ratification again.
+Ownership is split into experience and enforcement (founder ruling, Nov 25, 2026, "yes send the re-cut"). This spec is
+the single contract between the two sides, and a change to it needs the founder's ratification again.
+
+| Side | Owner | Covers |
+| --- | --- | --- |
+| **Experience** (everything an agent or a person sees) | The founder, with the audit build lane | The CLI asking for permission and carrying on without sharing; human-presence handling; on-machine secret redaction before vendor sends; the outbox (author and owner items, 72-hour expiry); the goal's "visible to" line and "Always for this goal" rules; owner ceiling presets; the weekly receipt with undo; adversarial tests proving an agent cannot approve itself. Reviewed by the founder against her mock |
+| **Enforcement** | Sean | Issuing grants and consuming them in the same transaction as the write; voiding them on any policy change, with migration 35's blocking triggers removed; consent sequence numbers; the default-off release capability list; recent-sign-in checks on consent routes |
+
+Each side is reviewed by someone who did not write it. Sean reviews the server-facing contract of the experience work;
+an independent reviewer covers the rest. No build starts until Sean has reviewed this spec's server half.
 
 ## Why
 
