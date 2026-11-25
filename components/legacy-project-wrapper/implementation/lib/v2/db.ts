@@ -6,6 +6,7 @@ import { config } from "../config";
 import { readChangeset, type CsChange, type CsRecord } from "./changeset.mts";
 import { SCHEMA_VERSION, type Sql } from "./core.mts";
 import { count } from "./plural.mts";
+import { flushExcerptStorage } from "./excerpt-retention.mts";
 import { backfillChangeElements } from "./change-elements.mts";
 
 // Goal sessions storage: one SQLite file (WAL) at <ALIGN_DATA_DIR or ./data>/v2/align.sqlite, directory 0700, file 0600.
@@ -40,7 +41,7 @@ function lockDown(file: string) {
 
 function connect(file: string, busyMs: number): DatabaseSync {
   const d = new DatabaseSync(file, { enableForeignKeyConstraints: true, timeout: busyMs });
-  d.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${busyMs}; PRAGMA synchronous = NORMAL;`);
+  d.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${busyMs}; PRAGMA synchronous = NORMAL; PRAGMA secure_delete = ON;`);
   return d;
 }
 
@@ -105,6 +106,25 @@ export const onWsChange = (l: TouchListener) => touches().onChange(l);
 export const holdTouches = (): TouchHold => touches().hold();
 
 let depth = 0;
+const gc = globalThis as unknown as { __alignExcerptCleanup?: ReturnType<typeof setTimeout> };
+
+function cleanExcerptStorage() {
+  if (gc.__alignExcerptCleanup) return;
+  const retry = () => {
+    gc.__alignExcerptCleanup = setTimeout(() => {
+      gc.__alignExcerptCleanup = undefined;
+      cleanExcerptStorage();
+    }, 1000);
+    gc.__alignExcerptCleanup.unref?.();
+  };
+  try {
+    if (!flushExcerptStorage(sql)) retry();
+  } catch (e) {
+    // The deletion is committed. Retry storage cleanup without presenting a failed mutation.
+    if (!isBusy(e)) console.error("Excerpt storage cleanup:", (e as Error)?.name ?? "Error");
+    retry();
+  }
+}
 
 /** Wait for the domain connection and BEGIN IMMEDIATE, retrying a busy start for up to ~5 s. */
 async function begin() {
@@ -125,28 +145,76 @@ async function begin() {
   }
 }
 
+export const DISPATCH_WINDOW_MS = 750;
+type DispatchWindow = { ws_id: string; capability: string; until_ms: number; elapsedAt: number };
+const dispatchState = globalThis as typeof globalThis & { alignDispatchWindows?: Map<string, DispatchWindow> };
+const dispatchWindows = () => dispatchState.alignDispatchWindows ??= new Map();
+const dispatchKey = (ws: string, capability: string) => JSON.stringify([ws, capability]);
+
+export function trackDispatchWindow(ws: string, capability: string, stamp: number) {
+  dispatchWindows().set(dispatchKey(ws, capability), {
+    ws_id: ws, capability, until_ms: stamp, elapsedAt: performance.now() + DISPATCH_WINDOW_MS,
+  });
+  setTimeout(() => void tx(() => undefined).catch(() => undefined), DISPATCH_WINDOW_MS + 1).unref();
+}
+
+function clearElapsedDispatchWindows() {
+  if (!dispatchWindows().size) return;
+  const now = performance.now();
+  for (const [key, window] of dispatchWindows()) {
+    if (window.elapsedAt > now) continue;
+    run("UPDATE v2_model_send_windows SET until_ms = 0 WHERE ws_id = ? AND capability = ? AND until_ms = ?",
+      window.ws_id, window.capability, window.until_ms);
+    // A blocked transaction can roll back this write. Keep the deadline until a commit.
+    if (!get("SELECT 1 FROM v2_model_send_windows WHERE ws_id = ? AND capability = ?", window.ws_id, window.capability))
+      dispatchWindows().delete(key);
+  }
+}
+
+function rememberOtherDispatchWindows() {
+  for (const row of all<Omit<DispatchWindow, "elapsedAt">>("SELECT ws_id, capability, until_ms FROM v2_model_send_windows WHERE until_ms > 0")) {
+    const key = dispatchKey(row.ws_id, row.capability);
+    if (dispatchWindows().get(key)?.until_ms === row.until_ms) continue;
+    dispatchWindows().set(key, { ...row, elapsedAt: performance.now() + DISPATCH_WINDOW_MS });
+  }
+}
+
+function forgetElapsedDispatchWindows() {
+  const now = performance.now();
+  for (const [key, window] of dispatchWindows()) {
+    if (window.elapsedAt <= now) dispatchWindows().delete(key);
+  }
+}
+
 /** Run `fn` synchronously inside BEGIN IMMEDIATE ... COMMIT (ROLLBACK if it throws). A busy start is retried
  *  asynchronously for up to ~5 s. Nested calls join the outer transaction. */
 export async function tx<T>(fn: () => T): Promise<T> {
   if (depth > 0) return fn();
-  let held: TouchHold | undefined;
-  const d = await begin();
-  depth++;
-  try {
-    held = holdTouches();
-    const out = fn();
-    if (out instanceof Promise) throw new Error("tx() callbacks must be synchronous");
-    d.exec("COMMIT");
-    held.commit();
-    return out;
-  } catch (e) {
+  for (let attempt = 0; ; attempt++) {
+    let held: TouchHold | undefined;
+    const d = await begin();
+    depth++;
     try {
-      d.exec("ROLLBACK");
-    } catch {}
-    throw e;
-  } finally {
-    held?.discard();
-    depth--;
+      held = holdTouches();
+      clearElapsedDispatchWindows();
+      const out = fn();
+      if (out instanceof Promise) throw new Error("tx() callbacks must be synchronous");
+      d.exec("COMMIT");
+      forgetElapsedDispatchWindows();
+      cleanExcerptStorage();
+      held.commit();
+      return out;
+    } catch (e) {
+      try {
+        d.exec("ROLLBACK");
+      } catch {}
+      if (!(e instanceof Error) || e.message !== "decision dispatch active" || attempt >= 100) throw e;
+      rememberOtherDispatchWindows();
+    } finally {
+      held?.discard();
+      depth--;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
@@ -1563,6 +1631,213 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (ws_id, user_id, goal_id),
     FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
   );
+  `,
+  // Migration 32: explicit sharing choices and short-lived private findings.
+  `
+  ALTER TABLE v2_sessions ADD COLUMN work_signals INTEGER CHECK (work_signals IN (0, 1));
+  ALTER TABLE v2_sessions ADD COLUMN analysis_deleted_at TEXT;
+  ALTER TABLE v2_devices ADD COLUMN legacy_work_signals INTEGER NOT NULL DEFAULT 0 CHECK (legacy_work_signals IN (0, 1));
+  UPDATE v2_devices SET legacy_work_signals = 1;
+  CREATE TABLE v2_data_restrictions (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    tier INTEGER NOT NULL CHECK (tier BETWEEN 1 AND 4),
+    PRIMARY KEY (ws_id, tier)
+  );
+  CREATE TABLE v2_device_result_consent (
+    device_id TEXT PRIMARY KEY REFERENCES v2_devices(id) ON DELETE CASCADE,
+    enabled_at TEXT NOT NULL
+  );
+  CREATE TABLE v2_analysis_findings (
+    ws_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    epoch_id TEXT NOT NULL,
+    device_id TEXT NOT NULL REFERENCES v2_devices(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    goal_version INTEGER NOT NULL,
+    limit_id TEXT NOT NULL,
+    evidence TEXT NOT NULL CHECK (evidence IN ('wording','example','tool','file','git')),
+    digest TEXT NOT NULL,
+    turn_started_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, session_key, device_id, id),
+    FOREIGN KEY (ws_id, session_key, epoch_id) REFERENCES v2_epochs(ws_id, session_key, epoch_id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_analysis_expiry ON v2_analysis_findings(turn_started_at);
+  CREATE INDEX v2_analysis_receipt_expiry ON v2_analysis_findings(received_at);
+  `,
+  // Migration 33: workspace decision service and confirmed local suggestion provenance.
+  `
+  CREATE TABLE v2_workspace_decision_services (
+    ws_id TEXT PRIMARY KEY REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    revision TEXT NOT NULL
+  );
+  CREATE TABLE v2_epochs_next (
+    ws_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    epoch_id TEXT NOT NULL,
+    goal_id TEXT,
+    goal_version_at_start INTEGER,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT,
+    root_turn TEXT,
+    cause TEXT NOT NULL,
+    authority TEXT NOT NULL CHECK (authority IN ('none','own','pod','alignment')),
+    alignment_id TEXT,
+    created_at TEXT NOT NULL,
+    spend_team_id TEXT,
+    origin TEXT CHECK (origin IN (
+      'hand', 'folder_rule', 'anchor_hint', 'alignment', 'switch_request', 'past_import',
+      'suggested_agent', 'suggested_model', 'suggested_rule'
+    )),
+    PRIMARY KEY (ws_id, session_key, epoch_id),
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, alignment_id) REFERENCES v2_alignments(ws_id, id)
+  );
+  INSERT INTO v2_epochs_next (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, ends_at,
+      root_turn, cause, authority, alignment_id, created_at, spend_team_id, origin)
+    SELECT ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, ends_at,
+      root_turn, cause, authority, alignment_id, created_at, spend_team_id,
+      CASE WHEN goal_id IS NULL AND origin IN ('suggested_agent', 'suggested_model', 'suggested_rule')
+        THEN NULL ELSE origin END FROM v2_epochs;
+  DROP TABLE v2_epochs;
+  ALTER TABLE v2_epochs_next RENAME TO v2_epochs;
+  CREATE UNIQUE INDEX v2_epochs_open ON v2_epochs(ws_id, session_key) WHERE ends_at IS NULL;
+  `,
+  // Migration 34: deliberate excerpts and the evidence label for model checks.
+  `
+  CREATE TABLE v2_device_excerpt_consent (
+    device_id TEXT PRIMARY KEY REFERENCES v2_devices(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    revision INTEGER NOT NULL CHECK (revision > 0)
+  );
+  CREATE TABLE v2_model_send_windows (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    capability TEXT NOT NULL CHECK (capability IN ('suggestion', 'limit_check')),
+    until_ms INTEGER NOT NULL,
+    PRIMARY KEY (ws_id, capability)
+  );
+  CREATE TABLE v2_model_check_blocks (
+    ws_id TEXT PRIMARY KEY REFERENCES v2_workspaces(id) ON DELETE CASCADE
+  );
+  CREATE TABLE v2_excerpt_share_ids (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_excerpt_share_workspace ON v2_excerpt_share_ids(ws_id);
+  CREATE TABLE v2_excerpt_storage_cleanup (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    generation BLOB NOT NULL
+  );
+  CREATE TABLE v2_session_excerpts (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    shared_by TEXT NOT NULL,
+    text TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, shared_by) REFERENCES v2_members(ws_id, user_id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_excerpt_expiry ON v2_session_excerpts(expires_at);
+  CREATE INDEX v2_excerpt_session ON v2_session_excerpts(ws_id, session_key);
+  CREATE INDEX v2_excerpt_sharer ON v2_session_excerpts(ws_id, shared_by);
+  CREATE TABLE v2_excerpt_readers (
+    ws_id TEXT NOT NULL,
+    excerpt_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    PRIMARY KEY (ws_id, excerpt_id, user_id),
+    FOREIGN KEY (ws_id, excerpt_id) REFERENCES v2_session_excerpts(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, user_id) REFERENCES v2_members(ws_id, user_id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_excerpt_reader ON v2_excerpt_readers(ws_id, user_id);
+  CREATE TRIGGER v2_excerpt_storage_deleted AFTER DELETE ON v2_session_excerpts
+  BEGIN
+    INSERT INTO v2_excerpt_storage_cleanup VALUES (1, randomblob(16))
+    ON CONFLICT(id) DO UPDATE SET generation = excluded.generation;
+  END;
+
+  ALTER TABLE v2_analysis_findings RENAME TO v2_analysis_findings_previous;
+  CREATE TABLE v2_analysis_findings (
+    ws_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    epoch_id TEXT NOT NULL,
+    device_id TEXT NOT NULL REFERENCES v2_devices(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    goal_version INTEGER NOT NULL,
+    limit_id TEXT NOT NULL,
+    evidence TEXT NOT NULL CHECK (evidence IN ('wording','example','tool','file','git','model')),
+    digest TEXT NOT NULL,
+    turn_started_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, session_key, device_id, id),
+    FOREIGN KEY (ws_id, session_key, epoch_id) REFERENCES v2_epochs(ws_id, session_key, epoch_id) ON DELETE CASCADE
+  );
+  INSERT INTO v2_analysis_findings
+    (ws_id, session_key, epoch_id, device_id, id, goal_version, limit_id, evidence, digest, turn_started_at, received_at)
+    SELECT ws_id, session_key, epoch_id, device_id, id, goal_version, limit_id, evidence, digest, turn_started_at, received_at
+    FROM v2_analysis_findings_previous;
+  DROP TABLE v2_analysis_findings_previous;
+  CREATE INDEX v2_analysis_expiry ON v2_analysis_findings(turn_started_at);
+  CREATE INDEX v2_analysis_receipt_expiry ON v2_analysis_findings(received_at);
+  `,
+  // Migration 35: a short dispatch boundary and a separate answer revision.
+  `
+  DROP TABLE v2_model_send_windows;
+  CREATE TABLE v2_model_send_windows (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    capability TEXT NOT NULL CHECK (capability IN ('suggestion', 'limit_check', 'excerpt') OR capability IN ('work_signals', 'derived_results')),
+    until_ms INTEGER NOT NULL,
+    revision TEXT NOT NULL,
+    PRIMARY KEY (ws_id, capability)
+  );
+  ${[
+    ["v2_data_restrictions", "INSERT", "NEW.ws_id", "(NEW.tier = 1 AND w.capability = 'work_signals') OR (NEW.tier = 2 AND w.capability = 'derived_results') OR (NEW.tier = 3 AND w.capability = 'suggestion') OR (NEW.tier = 4 AND w.capability = 'excerpt')"],
+    ["v2_data_restrictions", "DELETE", "OLD.ws_id", "(OLD.tier = 1 AND w.capability = 'work_signals') OR (OLD.tier = 2 AND w.capability = 'derived_results') OR (OLD.tier = 3 AND w.capability = 'suggestion') OR (OLD.tier = 4 AND w.capability = 'excerpt')"],
+    ["v2_model_check_blocks", "INSERT", "NEW.ws_id", "w.capability = 'limit_check'"],
+    ["v2_model_check_blocks", "DELETE", "OLD.ws_id", "w.capability = 'limit_check'"],
+    ["v2_workspace_decision_services", "INSERT", "NEW.ws_id", "w.capability <> 'excerpt'"],
+    ["v2_workspace_decision_services", "UPDATE", "OLD.ws_id", "w.capability <> 'excerpt'"],
+    ["v2_workspace_decision_services", "DELETE", "OLD.ws_id", "w.capability <> 'excerpt'"],
+    ["v2_pod_members", "INSERT", "NEW.ws_id", "1"],
+    ["v2_pod_members", "UPDATE OF role", "OLD.ws_id", "NEW.role IS NOT OLD.role"],
+    ["v2_pod_members", "DELETE", "OLD.ws_id", "1"],
+    ["v2_members", "UPDATE OF role", "OLD.ws_id", "NEW.role IS NOT OLD.role"],
+    ["v2_members", "DELETE", "OLD.ws_id", "1"],
+    ["v2_device_grants", "DELETE", "OLD.ws_id", "1"],
+    ["v2_devices", "UPDATE OF revoked_at", "w.ws_id",
+      "NEW.revoked_at IS NOT OLD.revoked_at AND EXISTS (SELECT 1 FROM v2_device_grants WHERE device_id = OLD.id AND ws_id = w.ws_id)"],
+    ["v2_device_excerpt_consent", "UPDATE OF revision", "w.ws_id",
+      "NEW.revision IS NOT OLD.revision AND w.capability = 'excerpt' AND EXISTS (SELECT 1 FROM v2_device_grants WHERE device_id = OLD.device_id AND ws_id = w.ws_id)"],
+    ["v2_device_excerpt_consent", "DELETE", "w.ws_id",
+      "w.capability = 'excerpt' AND EXISTS (SELECT 1 FROM v2_device_grants WHERE device_id = OLD.device_id AND ws_id = w.ws_id)"],
+    ["v2_device_result_consent", "DELETE", "w.ws_id",
+      "w.capability = 'derived_results' AND EXISTS (SELECT 1 FROM v2_device_grants WHERE device_id = OLD.device_id AND ws_id = w.ws_id)"],
+    ["v2_goals", "INSERT", "NEW.ws_id", "w.capability = 'suggestion'"],
+    ["v2_goals", "UPDATE OF status, title, visibility, owner_id, pod_id", "OLD.ws_id",
+      "w.capability <> 'excerpt' AND (NEW.status IS NOT OLD.status OR NEW.title IS NOT OLD.title OR NEW.visibility IS NOT OLD.visibility OR NEW.owner_id IS NOT OLD.owner_id OR NEW.pod_id IS NOT OLD.pod_id)"],
+    ["v2_goals", "DELETE", "OLD.ws_id", "w.capability <> 'excerpt'"],
+    ["v2_workspaces", "UPDATE OF deleted_at", "OLD.id", "NEW.deleted_at IS NOT OLD.deleted_at"],
+    ["v2_sessions", "UPDATE OF state, device_id, analysis_deleted_at", "OLD.ws_id",
+      "w.capability IN ('limit_check', 'excerpt', 'work_signals', 'derived_results') AND (NEW.state IS NOT OLD.state OR NEW.device_id IS NOT OLD.device_id OR NEW.analysis_deleted_at IS NOT OLD.analysis_deleted_at)"],
+    ["v2_sessions", "UPDATE OF work_signals", "OLD.ws_id",
+      "w.capability = 'work_signals' AND NEW.work_signals IS NOT OLD.work_signals AND NEW.work_signals = 0"],
+    ["v2_sessions", "DELETE", "OLD.ws_id", "w.capability IN ('limit_check', 'excerpt', 'work_signals', 'derived_results')"],
+  ].map(([table, action, workspace, predicate], i) => `
+    CREATE TRIGGER v2_decision_dispatch_${i} BEFORE ${action} ON ${table}
+    BEGIN
+      SELECT RAISE(ABORT, 'decision dispatch active')
+        WHERE EXISTS (SELECT 1 FROM v2_model_send_windows w WHERE w.ws_id = ${workspace}
+          AND (${predicate}) AND w.until_ms > 0);
+      UPDATE v2_model_send_windows SET revision = lower(hex(randomblob(16)))
+        WHERE EXISTS (SELECT 1 FROM v2_model_send_windows w WHERE w.ws_id = v2_model_send_windows.ws_id
+          AND w.capability = v2_model_send_windows.capability AND w.ws_id = ${workspace} AND (${predicate}));
+    END;
+  `).join("\n")}
   `,
 ];
 

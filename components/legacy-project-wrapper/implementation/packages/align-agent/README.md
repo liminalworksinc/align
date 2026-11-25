@@ -9,6 +9,38 @@ reach the server. Wire contract: `docs/v2/WIRE.md`. Harness facts and sources: `
 
 Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
+## Session analysis
+
+After sync releases its lock, a short local pass reads completed turns from their original transcript files. Run
+`align analysis show <session>` for record counts, limit findings and local feedback. Add `--json` to see the
+exact records Align acknowledged. Run `align analysis delete <session>` to remove the results and request deletion
+of shared findings.
+Inside a session, `::align drift wrong [limit id]` and `::align drift missed` record feedback on this machine.
+Run `align data-sharing` to see what can leave the machine and who receives it. The proposed derived-results option
+starts off and only works with a local Align server. Findings stay on the machine with hosted Align.
+
+After a completed turn, Align can suggest a goal using folder rules, repository and branch matches, or your
+bindings on this machine. The next turn shows the suggestion to you. Use `::align share` to preview it,
+`::align share <goal>` to pick a goal, or `::align dismiss` to skip it. Use `::align not this` to mark a wrong
+suggestion and `::align quiet` to stop suggestions in a folder. `::align suggestions on` turns them back on there.
+A shared session can offer `::align bind <goal>` if several turns point to a different goal.
+
+The workspace can block both proposed model choices. Both start off.
+
+- `align data-sharing session-question on` records your choice for a short fork that uses the original provider and
+  account. It can send eligible goal ids and titles and use tokens on that account. The current integrations skip
+  this option because they cannot keep the original provider and account for a fork.
+- `align data-sharing decision-model on [typesafe|openai|google]` sends your first prompt, branch when known,
+  saved repository alias and eligible goal ids and titles to the named decision provider, using your own key. The default choice is
+  TypeSafe Jev. Supply the corresponding `ALIGN_DECISION_TYPESAFE_KEY`, `ALIGN_DECISION_OPENAI_KEY` or
+  `ALIGN_DECISION_GOOGLE_KEY` in the environment of the process running `align sync`.
+- `align data-sharing decision-model on workspace` opts in to the address a workspace owner set in People.
+  It uses `ALIGN_DECISION_WORKSPACE_KEY` from the local worker. An owner can use HTTPS or loopback HTTP in
+  Mode L. After a change to the address, opt in again if you want to send to it. Add `--workspace <name>`
+  to choose where the decision setting applies.
+- Replace `on` with `off` to turn either choice off. `align analysis show <session>` shows locally recorded
+  suggestions and feedback. A confirmed binding goes to Align with its goal id and sharing source.
+
 ## Install
 
 From a checkout: `npm ci && npm run build` here, then `align install` and `align login`. Once release
@@ -223,7 +255,7 @@ a log alive, without a size cap. Uninstall removes counters, including without `
   and measures never count. If one may conflict, the next prompt shows *you* a `systemMessage` naming every limit it
   may conflict with (up to 3 per prompt; at most 3 notices per limit per session). Each crossing sentence is told
   once (only a digest of it is kept), so a false alarm never silences a later, different crossing. Nothing is
-  uploaded, nothing is added to the model's context, no reply text is kept, and it never blocks. `align config drift
+  uploaded by the legacy reply check. These notices stay out of the session context and never block. `align config drift
   off` turns it off.
 - **Past sessions.** `align share --dir <folder> --past <days>` writes the folder rule and also shares the sessions
   already metered on this machine in the last 1 to 14 days whose own recorded folders (the first one and any it later
@@ -307,6 +339,33 @@ agent time outside shared sessions, by folder, and the week its note was shown; 
 
 Set `"default_workspace": "<ws id>"` in `config.json` if you belong to several workspaces and want `::align share`
 without `--dir`; `align config` shows it. Otherwise the default is the only workspace this device reaches, or none.
+
+## Proposed model limit checks
+
+The CLI checks completed turns after sync when this machine has opted in and the workspace permits it. The
+workspace owner sets the decision service address in People. Use HTTPS, or HTTP on loopback in Mode L. Set
+`ALIGN_DECISION_WORKSPACE_KEY` in the environment that runs sync.
+
+Run `align data-sharing model preview` and use the printed command to allow that recipient on this pairing
+for the chosen workspace. Run the preview again if the workspace address changes. This choice and its workspace
+block are independent of goal suggestions.
+The recipient gets the last assistant reply up to 2,000 UTF-8 bytes, selected limit wording and types, and fixed
+questions. Use `align analysis show <session>` to read the evidence for a finding, or mark a notice wrong with
+`::align drift wrong`. `align data-sharing model off` stops requests. Sharing a finding with Align also requires
+`align data-sharing results on`, a local Align server, and workspace permission.
+
+## Proposed deliberate excerpts
+
+1. Run `align data-sharing excerpts on` and `align excerpt readers <session>`.
+2. Use `align analysis show <session> --json` to find the completed turn's `root`. Copy the exact portion of one prompt
+   or reply into a text file. Match the original line breaks, including whether the selection ends with a newline.
+3. Run `align excerpt preview <session> --turn <root> --file <path> --reader <id> --purpose "<purpose>" --hours <n>`.
+   Repeat `--reader` to name up to five people. Choose 1 to 168 whole hours.
+4. Review the text and audience. Within ten minutes repeat the command with `share` in place of `preview` and add
+   `--confirm <code>` using the preview's code. The expiry starts when Align accepts the share.
+
+The sharer and the named readers can open the excerpt in the workspace's Sessions page. The sharer can revoke it
+there. `align data-sharing excerpts off` stops new uploads.
 
 ## Privacy rules in code
 

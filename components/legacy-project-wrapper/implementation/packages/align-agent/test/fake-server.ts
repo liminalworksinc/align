@@ -93,6 +93,7 @@ export class FakeServer {
   /** Each self-revoke, with the device it named as its replacement (`replaced_by`, null when none). */
   revokesSeen: { device: string; replaced_by: string | null }[] = [];
   /** Hold matching calls (before the server looks at them) until `release` settles; `left` of them, when set (C4). */
+  beforeReply?: (method: string, path: string, status: number, body: any) => Promise<void>;
   holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number; drop?: boolean } | null = null;
   /** Answer matching calls 503 without processing them (a proxy in front of a failing route, C4-3). */
   failCalls: ((method: string, path: string) => boolean) | null = null;
@@ -121,6 +122,18 @@ export class FakeServer {
   /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
   activity: any[] = [];
   activitySeq = 0;
+  /** Work-signal consent in the local test stand-in. */
+  workSignals = new Set<string>();
+  activityRedirect?: string;
+  resultConsent = new Map<string, string>();
+  findingsBlocked = false;
+  findingsAvailable = true;
+  modelChecksBlocked = false;
+  excerptsBlocked = false;
+  excerptRevisions = new Map<string, number>();
+  excerptConsent = new Set<string>();
+  findings = new Map<string, unknown[]>();
+  requestBodies: unknown[] | null = null;
   epochs = new Map<string, any>();
   dropEpochOrigin = false;
   /** AskView per workspace, as `GET /api/v2/workspaces/:ws/asks` returns them (the reader's `can` flags included). */
@@ -172,6 +185,8 @@ export class FakeServer {
   receipts: { id: string; session_key: string; state: string; at: string; auto_accepted?: boolean }[] = [];
   requests = new Map<string, FakeRequest>();
   /** Goal holds by `${ws}/${goal}` (`v2_goal_holds`). */
+  blockedModelWorkspaces = new Set<string>();
+  decisionServices = new Map<string, { url: string; revision: string }>();
   holds = new Map<string, { held_by: { id: string; name: string }; reason: string | null; at: string; directive_id: string }>();
   refreshes = 0;
   /** Refreshes refused as clock_skew. */
@@ -417,7 +432,9 @@ export class FakeServer {
     this.beforeRequest?.(req.method || "", p);
     const send = (status: number, body?: unknown, headers?: Record<string, string>) => {
       entry.status = status;
-      this.send(res, status, body, headers);
+      if (this.beforeReply) {
+        void this.beforeReply(entry.method, p, status, body).then(() => this.send(res, status, body, headers));
+      } else this.send(res, status, body, headers);
     };
     if (this.offline) {
       entry.status = 503;
@@ -434,6 +451,7 @@ export class FakeServer {
     if (req.headers.origin) return send(403, { error: "origin_forbidden" });
     try {
       const body = req.method === "GET" || req.method === "DELETE" ? null : await this.body(req);
+      if (body) this.requestBodies?.push(body);
       // ---- device flow ----
       if (req.method === "POST" && p === "/api/v2/device/authorize" && this.authorizeLimited) {
         const lim = this.authorizeLimited;
@@ -508,10 +526,48 @@ export class FakeServer {
         this.revokesSeen.push({ device: dev.id, replaced_by: url.searchParams.get("replaced_by") });
         return send(204);
       }
+      if (req.method === "PUT" && p === "/api/v2/devices/self/data-sharing") {
+        if (body.tier === 4) {
+          const prior = this.excerptRevisions.get(dev.id) ?? 0;
+          if (!Number.isSafeInteger(body.revision) || body.revision < 1) return send(400);
+          if (body.revision <= prior) return send(200, { enabled: this.excerptConsent.has(dev.id), revision: prior });
+          this.excerptRevisions.set(dev.id, body.revision);
+          if (body.enabled) this.excerptConsent.add(dev.id);
+          else this.excerptConsent.delete(dev.id);
+          return send(200, { enabled: this.excerptConsent.has(dev.id), revision: body.revision });
+        }
+        if (body.enabled && !this.findingsAvailable) return send(403, { error: "results_unavailable" });
+        if (body.enabled && !this.resultConsent.has(dev.id)) this.resultConsent.set(dev.id, new Date().toISOString());
+        else if (!body.enabled) this.resultConsent.delete(dev.id);
+        return send(200, { enabled: this.resultConsent.has(dev.id) });
+      }
       if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces, other_workspaces: this.otherWorkspaces });
       if (req.method === "GET" && p === "/api/v2/devices") {
         const list = [...this.devices.values()].map((d) => ({ id: d.id, name: d.name, created_at: d.createdAt ?? new Date(0).toISOString(), last_seen_at: d.createdAt ?? null, revoked_at: d.revoked ? new Date().toISOString() : null, revoked_reason: d.revoked ? d.revokedReason || "revoked_on_web" : null, workspaces: [], current: d.id === dev.id }));
         return send(200, { devices: list });
+      }
+      const dataSharing = /^\/api\/v2\/workspaces\/([^/]+)\/data-sharing$/.exec(p);
+      if (dataSharing && req.method === "GET") {
+        const ws = dataSharing[1];
+        const workspace = this.workspaces.find((w) => w.id === ws);
+        if (!workspace) return send(404, { error: "not_found" });
+        const suggestion = url.searchParams.get("for") === "model-suggestion";
+        if (workspace.role === "viewer" && suggestion) return send(403, { error: "read_only" });
+        const blocked = this.blockedModelWorkspaces.has(ws);
+        const phase = url.searchParams.get("phase");
+        const revision = "1".repeat(32);
+        const decision_service = this.decisionServices.get(ws) ?? null;
+        const enabled = !blocked && (url.searchParams.get("recipient") !== "workspace" || !!decision_service)
+          && (phase === "dispatch" || (phase === "answer" && url.searchParams.get("revision") === revision));
+        return send(200, {
+          blocked: blocked ? [3] : [], decision_service,
+          model_check_blocked: this.modelChecksBlocked,
+          ...(suggestion ? {
+            enabled,
+            ...(enabled && phase === "dispatch" ? { send_for_ms: 750, revision,
+              goals: (this.goals.get(ws) ?? []).filter((g) => g.bindable && g.status === "active").map(({ id, title }) => ({ id, title })) } : {}),
+          } : {}),
+        });
       }
       let m = /^\/api\/v2\/workspaces\/([^/]+)\/goals$/.exec(p);
       if (m && req.method === "GET") {
@@ -528,7 +584,7 @@ export class FakeServer {
         const list = (this.asks.get(m[1]) || []).filter((a) => (!state || a.state === state) && (!team || a.team.id === team));
         return send(200, { version: v, asks: list }, { etag: `"${v}"` });
       }
-      m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing))?$/.exec(p);
+      m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing|work-signals|analysis|model-check|excerpts))?$/.exec(p);
       if (m) {
         const [, ws, key, , sub] = m;
         // As the server: a workspace this device's person is no longer a member of is out of reach.
@@ -562,7 +618,10 @@ export class FakeServer {
           return send(200, { session_key: key, state, current_epoch: open });
         }
         // As lib/v2/sessions.ts: history deleted already (on the web, say) -> 410 history_deleted to its own account.
-        if (!sess && !sub && req.method === "DELETE" && this.deletedKeys.has(key)) return send(410, { error: "history_deleted" });
+        if (!sess && req.method === "DELETE" && this.deletedKeys.has(key)) {
+          if (!sub) return send(410, { error: "history_deleted" });
+          if (sub === "analysis") return send(204);
+        }
         if (!sess) return send(404, { error: "not_found" });
         if (!sub && req.method === "DELETE") {
           if (this.refuseDeletes) return send(404, { error: "not_found" });
@@ -574,6 +633,53 @@ export class FakeServer {
           for (const [k, e] of this.epochs) if (e.session_key === key) this.epochs.delete(k);
           for (const [k, u] of this.usage) if (u.session_key === key) this.usage.delete(k);
           return send(204);
+        }
+        if (sub === "model-check" && req.method === "POST") {
+          const decision_service = this.decisionServices.get(ws);
+          const phase = url.searchParams.get("phase");
+          const revision = "2".repeat(32);
+          const enabled = !this.modelChecksBlocked && sess.state === "shared" && !!decision_service
+            && (phase === "dispatch" || (phase === "answer" && url.searchParams.get("revision") === revision));
+          return send(200, enabled ? { enabled, send_for_ms: 750, decision_service, revision } : { enabled });
+        }
+        if (sub === "excerpts") {
+          const enabled = !this.excerptsBlocked && sess.state === "shared" && this.excerptConsent.has(dev.id);
+          if (req.method === "GET") return send(200, {
+            enabled, readers: enabled ? [{ id: "u_reader", name: "Named reader" }] : [],
+            ...(enabled && url.searchParams.get("phase") === "dispatch" ? { send_for_ms: 750, revision: "4".repeat(32) } : {}),
+          });
+          if (req.method === "POST" && enabled) {
+            if (req.headers["if-match"] !== `"${this.excerptRevisions.get(dev.id)}"`) return send(409, { error: "excerpt_preview_expired" });
+            return send(200, { id: body.id, expires_at: new Date(Date.now() + body.hours * 3_600_000).toISOString() });
+          }
+          return send(403, { error: "excerpts_off" });
+        }
+        if (sub === "analysis") {
+          const enabled = this.findingsAvailable && !this.findingsBlocked && this.resultConsent.has(dev.id);
+          const findings = this.findings.get(key) ?? [];
+          if (req.method === "GET") return send(200, {
+            available: this.findingsAvailable, enabled, enabled_since: enabled ? this.resultConsent.get(dev.id) : null, findings,
+            ...(enabled && url.searchParams.get("phase") === "dispatch" ? { send_for_ms: 750, revision: "3".repeat(32) } : {}),
+          });
+          if (req.method === "DELETE") {
+            const before = url.searchParams.get("before");
+            const later = before ? findings.filter((finding) => String((finding as { turn_started_at: string }).turn_started_at) > before) : [];
+            if (later.length) this.findings.set(key, later);
+            else this.findings.delete(key);
+            return send(204);
+          }
+          if (req.method === "POST" && enabled) {
+            this.findings.set(key, [...findings, body]);
+            return send(200, body);
+          }
+          return send(403, { error: "results_off" });
+        }
+        if (sub === "work-signals" && req.method === "PUT") {
+          if (body.enabled && sess.state === "shared") this.workSignals.add(key);
+          else this.workSignals.delete(key);
+          return send(200, { enabled: this.workSignals.has(key),
+            ...(this.workSignals.has(key) && url.searchParams.get("phase") === "dispatch" ? { send_for_ms: 750, epochs: url.searchParams.getAll("epoch") } : {}),
+          });
         }
         if (sub === "stop-sharing") {
           this.stopOnWeb(key);
@@ -687,6 +793,7 @@ export class FakeServer {
       }
       m = /^\/api\/v2\/workspaces\/([^/]+)\/activity$/.exec(p);
       if (m && req.method === "POST") {
+        if (this.activityRedirect) return send(307, undefined, { location: this.activityRedirect });
         const items = Array.isArray(body?.items) ? body.items : [];
         let accepted = 0;
         // As lib/v2/activity.ts: what isn't taken is listed in `refused` (C3-4).
@@ -699,6 +806,10 @@ export class FakeServer {
           const sess = this.sessions.get(it.session_key);
           if (!sess || sess.device !== dev.id) {
             refused.push({ index, reason: "not_shared" });
+            continue;
+          }
+          if ((it.path != null || it.text != null) && !this.workSignals.has(it.session_key)) {
+            refused.push({ index, reason: "work_signals_off" });
             continue;
           }
           this.activity.push({ ...it, seq: ++this.activitySeq, ws: m[1], harness: sess.body.harness, user: { id: this.user.id, name: this.user.name }, mine: true, goal_id: sess.body.goal_id ?? "g_ship", expires_at: new Date(Date.parse(it.at) + 86_400_000).toISOString() });

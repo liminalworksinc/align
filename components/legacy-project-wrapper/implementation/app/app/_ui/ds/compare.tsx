@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { changeWords, withHidden } from "@/lib/v2/change-words.mts";
+import { changeWords, limitChanged, limitDetails, withHidden } from "@/lib/v2/change-words.mts";
 import type { ChangeFields, Goal, Limit } from "../types";
 
 // Version compare (LIM-2472 workstream S, item 4): a plan before and after, field by field, the changed parts marked.
@@ -74,10 +74,18 @@ function Side({ field, v, other, side, titleOf, hidden }: { field: Field; v: unk
       <ul className="flex flex-col gap-0.5">
         {list.map((l) => {
           const twin = o.find((x) => x.id === l.id);
-          const mark: Mark = !twin ? (side === "after" ? "added" : "removed") : twin.text !== l.text || twin.type !== l.type ? (side === "after" ? "changed" : null) : null;
+          const mark: Mark = !twin ? (side === "after" ? "added" : "removed") : side === "after" && limitChanged(twin, l) ? "changed" : null;
+          const otherDetails = limitDetails(twin);
+          const details = limitDetails(l).filter(([, values], i) => values.length || otherDetails[i][1].length);
           return (
             <Item key={l.id} m={mark}>
               <span className="font-medium">{LIMIT_LABEL[l.type] ?? l.type}:</span> {l.text}
+              {details.length > 0 && <span className="mt-1 block space-y-1">
+                {details.map(([label, values]) => <span key={label} className="block">
+                  <span className="block font-medium">{label}</span>
+                  <span className="block">{values.length ? values.join(", ") : "None"}</span>
+                </span>)}
+              </span>}
             </Item>
           );
         })}

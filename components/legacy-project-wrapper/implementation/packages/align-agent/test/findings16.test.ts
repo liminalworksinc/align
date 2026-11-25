@@ -176,7 +176,7 @@ describe("A1-cross-1: the drift check follows the limit's type and its own negat
     runHook(t, "claude", "Stop", { session_id: sid, last_assistant_message: "We will drop the old ledger cluster tonight, before the cutover finishes." });
     assert.ok(fs.existsSync(layout.drift(t.home, lid)), "crossing");
     const told = sysOf(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "p1", prompt: "go" }).stdout);
-    assert.match(told, /Must not "Drop the old ledger cluster before the cutover\." This is a word check/);
+    assert.match(told, /Must not "Drop the old ledger cluster before the cutover\." \(lim_drop\)\. The reply check ran on this machine/);
     assert.doesNotMatch(told, /\."\./, "A1-cross-10: no doubled punctuation");
   });
 });

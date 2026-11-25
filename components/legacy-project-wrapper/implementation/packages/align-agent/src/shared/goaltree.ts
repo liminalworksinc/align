@@ -18,6 +18,9 @@ export function limitsOf(v: unknown): Limit[] {
       id: r.id,
       type: r.type as Limit["type"],
       text: r.text,
+      ...(Array.isArray(r.path_anchors) ? { path_anchors: r.path_anchors.filter((p): p is string => typeof p === "string" && p.length <= 160).slice(0, 5) } : {}),
+      ...(typeof r.example_crossing === "string" && r.example_crossing.length <= 160 ? { example_crossing: r.example_crossing } : {}),
+      ...(typeof r.example_within === "string" && r.example_within.length <= 160 ? { example_within: r.example_within } : {}),
       source: src ? { kind: src.kind === "meeting" ? "meeting" : "manual", title: String(src.title ?? ""), date: String(src.date ?? "") } : null,
     });
     if (out.length === 5) break;

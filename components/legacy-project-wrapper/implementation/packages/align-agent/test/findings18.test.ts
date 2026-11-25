@@ -14,6 +14,7 @@ import { nowIso } from "../src/db.ts";
 import { ensureSession } from "../src/ledger.ts";
 import { renderHot } from "../src/hot.ts";
 import { agentMayRead, pathHash, podReport, repoIdentity, siblingNews, type PodFeed, type RemoteItem } from "../src/hooks/siblings.ts";
+import { crossingDigest, exampleCrossings } from "../src/shared/drift.ts";
 import { DRIFT_PER_LIMIT } from "../src/hooks/handlers.ts";
 import { writeJsonAtomic, readJson } from "../src/shared/fsx.ts";
 import { layout } from "../src/shared/layout.ts";
@@ -159,7 +160,7 @@ describe("A2-cross-1: a drift notice latches the crossing sentence, never the wh
     assert.equal(turn('- Must not: "Drop the old ledger cluster before the cutover."\n- Must: "Keep the old ledger cluster readable until the cutover is verified."\n- Out of scope: "Rewriting the billing service."\n- Must: "Cut over the ledger without downtime."'), "");
     // M6: the real violation is told.
     const first = turn("We will drop the old ledger cluster tonight, before the cutover finishes.");
-    assert.match(first, /may conflict with a limit on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover\." This is a word check/);
+    assert.match(first, /may conflict with a limit on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover\." \(lim_drop\)\. The reply check ran on this machine/);
     // The same sentence again is not told twice.
     assert.equal(turn("We will drop the old ledger cluster tonight, before the cutover finishes."), "");
     // A later, different crossing of the same limit is told (before E2E acycle2 the limit stayed "noticed" for the session).
@@ -183,13 +184,34 @@ describe("A2-cross-1: a drift notice latches the crossing sentence, never the wh
   });
 });
 
+test("reply and transcript notices use the same repeat history, feedback target and cap", () => {
+  const { t, sid, lid, turn } = driftWorld();
+  const quote = "We will drop the old ledger cluster tonight, before the cutover finishes.";
+  const limit = LIMITS[0];
+  const earlier = exampleCrossings(limit, quote, {})[0];
+  assert.ok(earlier);
+  assert.match(turn(quote), /may conflict with a limit/);
+  const prompt = (id: string, text = "Continue") => runHook(t, "claude", "UserPromptSubmit",
+    { session_id: sid, prompt_id: id, prompt: text }).stdout;
+  assert.match(prompt("false-alarm", "::align drift wrong"), /false alarm/);
+  const notice = { id: "earlier", root: "earlier-turn", version: 1, title: "Cut over the ledger database",
+    limit, evidence: "wording", digest: "keyed-earlier", repeat: crossingDigest(limit.id, earlier.sentence) };
+  writeJsonAtomic(layout.analysis(t.home, lid), [notice]);
+  assert.equal(sysOf(prompt("repeat")), "");
+  writeJsonAtomic(layout.analysis(t.home, lid), [{ ...notice, id: "second", digest: "second", repeat: "different-evidence" }]);
+  assert.match(sysOf(prompt("second")), /work may have crossed/);
+  assert.match(turn("I'm going to drop the old ledger cluster now, ahead of the cutover."), /may conflict with a limit/);
+  writeJsonAtomic(layout.analysis(t.home, lid), [{ ...notice, id: "fourth", digest: "fourth", repeat: "fourth-evidence" }]);
+  assert.equal(sysOf(prompt("fourth")), "");
+});
+
 describe("A2-cross-4: a notice covering several limits names each, and latches only what it named", () => {
   test("a notice covering several limits names each (M8: three limits in one reply)", () => {
     const { t, lid, turn } = driftWorld();
     const told = turn("We will cut over the ledger with two hours of downtime. There is no reason to wait, so we will drop the old ledger cluster before the cutover. I will also start rewriting the billing service while I am here.");
     assert.equal(
       told,
-      'Align: the agent\'s last reply may conflict with 3 limits on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover."; Out of scope "Rewriting the billing service."; Must "Cut over the ledger without downtime." This is a word check on this machine only; nothing was sent or added to the agent\'s context. `align config drift off` turns it off.',
+      'Align: the agent\'s last reply may conflict with 3 limits on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover." (lim_drop); Out of scope "Rewriting the billing service." (lim_billing); Must "Cut over the ledger without downtime." (lim_downtime). The reply check ran on this machine. The reply stays here. Type `::align drift wrong` to mark this notice as a false alarm, or add a limit id to mark one. `align config drift off` turns it off.',
     );
     assert.doesNotMatch(told, /Keep the old ledger cluster readable|more of its limits/);
     const inj = readJson<InjectedState>(layout.injected(t.home, lid))!;
@@ -202,7 +224,8 @@ describe("A2-cross-4: a notice covering several limits names each, and latches o
       v: 1,
       goal_id: "g1",
       goal_title: "Cut over the ledger database",
-      items: LIMITS.map((l) => ({ limit_id: l.id, type: l.type, text: l.text, digests: [`d${l.id}`] })),
+      items: LIMITS.map((l) => ({ limit_id: l.id, type: l.type, text: l.text, digests: [`d${l.id}`],
+        turns: { [`d${l.id}`]: { root: "completed", version: 1 } } })),
       at: nowIso(),
     };
     writeJsonAtomic(layout.drift(t.home, lid), file);

@@ -131,6 +131,7 @@ describe("C10-2: in a folder with a rule, the rule's workspace is the session's"
     // It gets an alignment: the advised command shares the session in the rule's workspace.
     g.bindable = true;
     assert.equal((await runCli(t, ["goals", "--refresh"])).code, 0);
+    prompt(t, sid, "::align share Ship", dir);
     assert.match(prompt(t, sid, "::align share Ship confirm", dir).reason, /^Align: sharing requested toward "Ship the v2 onboarding flow"/);
     await sync(t);
     const rows = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];

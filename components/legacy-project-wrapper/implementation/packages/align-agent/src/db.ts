@@ -2,6 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import { layout } from "./shared/layout.ts";
 
+export const LEGACY_OUTBOX_KINDS = ["put_session", "post_epoch", "receipt", "stop_sharing", "delete_session"];
+export const LEGACY_OUTBOX_SQL = LEGACY_OUTBOX_KINDS.map((kind) => `'${kind}'`).join(", ");
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   local_id TEXT PRIMARY KEY,
@@ -82,6 +85,16 @@ CREATE TABLE IF NOT EXISTS files (
   rewrites INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  local_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sharing_outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   local_id TEXT NOT NULL,
   kind TEXT NOT NULL,
@@ -176,6 +189,88 @@ CREATE TABLE IF NOT EXISTS repo_aliases (
   PRIMARY KEY(workspace_id, repo_root)
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS analysis_jobs (
+  local_id TEXT NOT NULL,
+  root TEXT NOT NULL,
+  input TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (local_id, root)
+);
+CREATE TABLE IF NOT EXISTS analysis_results (
+  local_id TEXT NOT NULL,
+  root TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  result TEXT NOT NULL,
+  PRIMARY KEY (local_id, root)
+);
+CREATE TABLE IF NOT EXISTS analysis_feedback (
+  local_id TEXT NOT NULL,
+  root TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('wrong','missed')),
+  finding TEXT NOT NULL,
+  version INTEGER,
+  at TEXT NOT NULL,
+  digest TEXT,
+  PRIMARY KEY (local_id, root, kind, finding)
+);
+CREATE TABLE IF NOT EXISTS analysis_projection (local_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS analysis_copies (
+  local_id TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  session_key TEXT NOT NULL,
+  device TEXT NOT NULL,
+  id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  acknowledged INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (local_id, workspace, session_key, id)
+);
+CREATE TABLE IF NOT EXISTS analysis_decision_jobs (
+  local_id TEXT NOT NULL,
+  root TEXT NOT NULL,
+  input TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  device TEXT NOT NULL,
+  PRIMARY KEY (local_id, root)
+);
+CREATE TABLE IF NOT EXISTS goal_binding_history (
+  local_id TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  person TEXT NOT NULL,
+  folder TEXT NOT NULL,
+  repo TEXT,
+  branch TEXT,
+  goal TEXT NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY (local_id, workspace, person)
+);
+CREATE TABLE IF NOT EXISTS goal_suggestions (
+  local_id TEXT NOT NULL,
+  stage TEXT NOT NULL CHECK (stage IN ('initial','move')),
+  workspace TEXT NOT NULL,
+  root TEXT NOT NULL,
+  candidates TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY (local_id, stage)
+);
+CREATE TABLE IF NOT EXISTS goal_suggestion_feedback (
+  local_id TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  reply TEXT NOT NULL,
+  chosen TEXT,
+  at TEXT NOT NULL,
+  PRIMARY KEY (local_id, stage)
+);
+CREATE TABLE IF NOT EXISTS goal_suggestion_streaks (
+  local_id TEXT PRIMARY KEY,
+  binding TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  root TEXT NOT NULL,
+  count INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS gaps (reason TEXT PRIMARY KEY, n INTEGER NOT NULL);
 `;
 
@@ -206,6 +301,15 @@ export function openDb(alignHome: string): Db {
   db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=OFF;");
   db.exec(SCHEMA);
   addColumns(db);
+  // The previous sync loop claimed every kind from its outbox, including kinds it did not know.
+  const previous = `kind NOT IN (${LEGACY_OUTBOX_SQL})`;
+  if (db.prepare(`SELECT 1 FROM outbox WHERE ${previous} LIMIT 1`).get()) {
+    tx(db, () => {
+      db.exec(`INSERT INTO sharing_outbox(local_id, kind, payload, attempts, next_at, last_error, created_at)
+        SELECT local_id, kind, payload, attempts, next_at, last_error, created_at FROM outbox WHERE ${previous} ORDER BY id;
+        DELETE FROM outbox WHERE ${previous};`);
+    });
+  }
   try {
     fs.chmodSync(file, 0o600);
   } catch {
@@ -223,7 +327,9 @@ const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
   // What happened to a share (`ShareFacts`), for a notice worded when it is shown, from the state then (cycle 11).
   ["notices", "facts", "TEXT"],
   ["epochs", "origin", "TEXT"],
+  ["root_turns", "first_hook_at", "TEXT"],
   ["pending_bindings", "origin", "TEXT"],
+  ["analysis_copies", "server", "TEXT"],
 ];
 
 function addColumns(db: Db): void {

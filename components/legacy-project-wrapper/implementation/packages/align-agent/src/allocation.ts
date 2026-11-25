@@ -4,6 +4,7 @@ import fs from "node:fs";
 import type { Ctx } from "./context.ts";
 import { postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
+import { pastGoalSuggestion } from "./goal-suggestions.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
@@ -50,11 +51,25 @@ export async function uploadSteering(ctx: Ctx): Promise<number> {
 
 const fresh = "(input + output + cache_write_5m + cache_write_1h + cache_write_unsplit)";
 
+function refreshPastOffer(ctx: Ctx, digest: UnsharedDigest, now: number): UnsharedDigest {
+  const change = readJson<string>(layout.pastOfferChange(ctx.home));
+  return { ...digest, past_offer_change: change, past_goal: pastGoalSuggestion(ctx, digest.top.map(({ dir }) => dir), now) };
+}
+
 /** Agent time (fresh tokens) on this machine in the last 7 days, and the part in sessions not shared toward a goal,
  *  grouped by folder. Recomputed at most every 6 hours. Stays in ALIGN_HOME. */
 export function computeUnsharedDigest(ctx: Ctx, now = Date.now(), force = false): UnsharedDigest | null {
   const last = Number(kvGet(ctx.db, "unshared_digest_at") || 0);
-  if (!force && now - last < 6 * 3600_000) return readJson<UnsharedDigest>(layout.unsharedDigest(ctx.home));
+  if (!force && now - last < 6 * 3600_000) {
+    const previous = readJson<UnsharedDigest>(layout.unsharedDigest(ctx.home));
+    if (previous) {
+      const updated = refreshPastOffer(ctx, previous, now);
+      if (previous.past_offer_change !== updated.past_offer_change || JSON.stringify(previous.past_goal) !== JSON.stringify(updated.past_goal)) {
+        writeJsonAtomic(layout.unsharedDigest(ctx.home), updated);
+      }
+      return updated;
+    }
+  }
   const since = new Date(now - 7 * DAY).toISOString();
   // A request counts as shared when it went up (`uploaded` 1), or its session is shared now and it will go up. A
   // session whose share ended (this machine signed out, or a new pairing replaced the device) keeps what it shared:
@@ -89,7 +104,10 @@ export function computeUnsharedDigest(ctx: Ctx, now = Date.now(), force = false)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([dir, tokens]) => ({ dir, tokens }));
-  const d: UnsharedDigest = { computed_at: new Date(now).toISOString(), total_tokens: total, unshared_tokens: unshared, share: total ? Math.round((unshared / total) * 1000) / 10 : 0, top };
+  const d = refreshPastOffer(ctx, {
+    computed_at: new Date(now).toISOString(), total_tokens: total, unshared_tokens: unshared,
+    share: total ? Math.round((unshared / total) * 1000) / 10 : 0, top,
+  }, now);
   writeJsonAtomic(layout.unsharedDigest(ctx.home), d);
   kvSet(ctx.db, "unshared_digest_at", String(now));
   return d;

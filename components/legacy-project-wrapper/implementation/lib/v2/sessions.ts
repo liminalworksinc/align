@@ -10,7 +10,7 @@ import { authorize, canReadGoal, type PolicyPrincipal } from "./policy";
 import { stopStatus, writeDirective } from "./directives";
 import type { DevicePrincipal } from "./devices";
 import type { Principal } from "./http";
-import { need } from "./workspaces";
+import { memberPrincipal, need } from "./workspaces";
 import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
 import { homeTeamId } from "./spend-home";
@@ -44,6 +44,8 @@ export interface SessionRow {
   governing_alignment_id: string | null;
   agent_stopped: number;
   conflicts: number;
+  work_signals: number | null;
+  analysis_deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -164,7 +166,8 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
       // local secret), shares it again from now on.
       if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
       run(
-        "UPDATE v2_sessions SET device_id = ?, state = 'shared', stopped_at = NULL, ended_reason = NULL, repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+        "UPDATE v2_sessions SET device_id = ?, state = 'shared', stopped_at = NULL, ended_reason = NULL, work_signals = CASE WHEN device_id = ? THEN work_signals END, repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+        dev.deviceId,
         dev.deviceId,
         alias,
         title,
@@ -216,7 +219,8 @@ const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 function recordedEpochOrigin(ws: string, key: string, cause: string, origin: EpochOrigin | null, goalId: string | null): EpochOrigin | null {
   const directiveOrigin = origin === "alignment" || origin === "switch_request";
-  if (cause === "manual") return directiveOrigin ? null : origin;
+  const suggestionWithoutGoal = !goalId && (origin === "suggested_rule" || origin === "suggested_agent" || origin === "suggested_model");
+  if (cause === "manual") return directiveOrigin || suggestionWithoutGoal ? null : origin;
   if (!/^directive:dir_[a-z2-7]{24}$/.test(cause)) throw badRequest('cause must be "manual" or "directive:<dir_id>"');
   const id = cause.slice(10);
   const directive = get<{ kind: string | null; goal_id: string | null }>(
@@ -434,9 +438,13 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
  *  stop also for a session that had ended (`member_removed`, `device_signed_out`): the reason goes, so it is never
  *  shared again and its refusals say `ended_reason: null` (E2E-AGENT cycle 6). */
 export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string) {
-  ownSession(pp, p, key);
-  const at = nowIso();
   await tx(() => {
+    const current = memberPrincipal(pp.wsId, pp.userId);
+    need(current, "workspace.read");
+    if (p.kind === "device" && !get(`SELECT 1 FROM v2_device_grants g JOIN v2_devices d ON d.id = g.device_id
+      WHERE g.ws_id = ? AND g.device_id = ? AND d.revoked_at IS NULL`, pp.wsId, p.deviceId)) throw notFound();
+    ownSession(current, p, key);
+    const at = nowIso();
     run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, pp.wsId, key);
     run(
       "UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = NULL, governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?",
@@ -454,26 +462,33 @@ export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string
 
 /** The marker a deleted session leaves: a hash of the person who shared it and its key, never either one. */
 const deletedKeyHash = (userId: string, key: string) => sha256hex(`deleted-session\0${userId}\0${key}`);
+export function wasSessionDeleted(pp: PolicyPrincipal, key: string) {
+  return !!get("SELECT 1 FROM v2_deleted_sessions WHERE ws_id = ? AND key_hash = ?", pp.wsId, deletedKeyHash(pp.userId, key));
+}
 
 /** Delete shared history: the session, its epochs, usage, directive deliveries and receipts, hard-deleted.
  *  Spend totals change. Directives left with no recipient are removed too. Unlike the session's other calls, any live
  *  device of the person who shared it may do this, not only the device that shared it (C4-1): a re-pair would
  *  otherwise strand the history where only the web could delete it. The audit row names the device that did it. */
 export async function deleteSession(pp: PolicyPrincipal, p: Principal, key: string) {
-  const s = sessionRow(pp.wsId, key);
-  if (!s) {
-    // Deleted already (on the web, say): the account that shared it hears so, anyone else not found (cycle 5).
-    if (get("SELECT 1 AS x FROM v2_deleted_sessions WHERE ws_id = ? AND key_hash = ?", pp.wsId, deletedKeyHash(pp.userId, key))) {
-      throw new V2Error(410, "history_deleted", "This session's shared history was already deleted; nothing is left to delete");
-    }
-    throw notFound();
-  }
-  need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
   await tx(() => {
+    const current = memberPrincipal(pp.wsId, pp.userId);
+    need(current, "workspace.read");
+    if (p.kind === "device" && !get(`SELECT 1 FROM v2_device_grants g JOIN v2_devices d ON d.id = g.device_id
+      WHERE g.ws_id = ? AND g.device_id = ? AND d.revoked_at IS NULL`, pp.wsId, p.deviceId)) throw notFound();
+    const s = sessionRow(pp.wsId, key);
+    if (!s) {
+      if (wasSessionDeleted(current, key)) {
+        throw new V2Error(410, "history_deleted", "This session's shared history was already deleted; nothing is left to delete");
+      }
+      throw notFound();
+    }
+    need(current, "session.manage", { kind: "session", ownerId: s.user_id });
+    const at = nowIso();
     run("DELETE FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
-    run("INSERT OR REPLACE INTO v2_deleted_sessions (ws_id, key_hash, deleted_at) VALUES (?, ?, ?)", pp.wsId, deletedKeyHash(s.user_id, key), nowIso());
+    run("INSERT OR REPLACE INTO v2_deleted_sessions (ws_id, key_hash, deleted_at) VALUES (?, ?, ?)", pp.wsId, deletedKeyHash(s.user_id, key), at);
     run("DELETE FROM v2_directives WHERE ws_id = ? AND NOT EXISTS (SELECT 1 FROM v2_directive_targets t WHERE t.directive_id = v2_directives.id)", pp.wsId);
-    audit(pp.wsId, pp.userId, "session.history_deleted", p.kind === "device" ? p.deviceId : null, nowIso());
+    audit(pp.wsId, pp.userId, "session.history_deleted", p.kind === "device" ? p.deviceId : null, at);
   });
 }
 

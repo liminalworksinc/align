@@ -56,6 +56,7 @@ import {
   softDeleteWorkspace,
   workspaceSummaries,
 } from "../lib/v2/core.mts";
+import { flushExcerptStorage } from "../lib/v2/excerpt-retention.mts";
 import { describeCounts, retentionNow, runRetention } from "../lib/v2/retention-core.mts";
 import { buildReport, formatReport, LOI_EVENTS, recordLoi } from "../lib/v2/metrics-core.mts";
 
@@ -152,7 +153,7 @@ const file = path.join(dataDir, "v2", "align.sqlite");
 if (!existsSync(file)) fail(`No Align database at ${file}. Set ALIGN_DATA_DIR, or start the server once to create it.`);
 if (hosted && process.env.ALIGN_TEST_NOW) fail("ALIGN_TEST_NOW is not allowed when hosted", 2);
 const d = new DatabaseSync(file, { enableForeignKeyConstraints: true, timeout: 5000 });
-d.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+d.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;");
 const version = Number(d.prepare("PRAGMA user_version").get().user_version);
 if (version !== SCHEMA_VERSION) {
   d.close();
@@ -181,6 +182,9 @@ function tx(fn) {
 }
 /** The app's tx() for lib/v2/retention-core.mts: synchronous here (the script has the connection to itself). */
 const txAsync = (fn) => tx(fn);
+function finishExcerptCleanup() {
+  if (!flushExcerptStorage(db)) console.warn("Excerpt storage cleanup is waiting for the database. The running server or the next retention pass will retry.");
+}
 const secret = () => {
   // Hosted, the secret comes from the platform; generating one here would make codes the server can't check.
   if (hosted && !process.env.ALIGN_SECRET) fail("ALIGN_SECRET is not set in this shell. Run this on the server machine (fly ssh console), where it is.");
@@ -358,6 +362,7 @@ async function main() {
     if (opt.purge) {
       if (!opt.yes) fail(`This erases ${ws.id} ("${ws.name}") and everything in it now, for good: it can't be restored. Run it again with --purge --yes to go ahead.`);
       tx(() => purgeWorkspace(db, arg));
+      finishExcerptCleanup();
       console.log(`Purged ${ws.id} ("${ws.name}"): every row of it is gone.`);
       return;
     }
@@ -374,6 +379,7 @@ async function main() {
     const now = retentionNow();
     // ALIGN_SECRET keys the product events' actor hash, cleared for anyone the job makes a former member.
     const counts = await runRetention(db, txAsync, now, { dryRun, secret: secret() });
+    if (!dryRun) finishExcerptCleanup();
     console.log(`${dryRun ? "Would" : "Did"} (as of ${now.toISOString()}): ${describeCounts(counts)}`);
     console.log(JSON.stringify({ now: now.toISOString(), dry_run: dryRun, ...counts }));
     return;

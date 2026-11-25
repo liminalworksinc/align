@@ -112,12 +112,12 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
    (closes the previous open epoch at `starts_at`). 403 `{ "error": "alignment_required" }` if the goal isn't bindable.
    Epochs never overlap; a first share may open an epoch with `starts_at` = the session's start (counts from start).
 
-`Origin = "hand" | "folder_rule" | "anchor_hint" | "alignment" | "switch_request" | "past_import" | "suggested_agent" | "suggested_model"`.
+`Origin = "hand" | "folder_rule" | "anchor_hint" | "alignment" | "switch_request" | "past_import" | "suggested_agent" | "suggested_model" | "suggested_rule"`.
 The server records `alignment` for the session's `binding_changed` directive for the goal, and `switch_request` for a
 `switch_goal` directive to the session and goal with an accepted developer receipt. It records other known origins
 with a `manual` cause. If a known origin cannot be confirmed, an otherwise valid epoch returns 200 with `origin: null`
 and can receive usage. An unknown origin is 400. Every cause must be `manual` or name a directive sent to this session.
-Omitted origin and legacy rows have null origin. The CLI does not send `suggested_agent` or `suggested_model`.
+Omitted origin and legacy rows have null origin. The three suggestion origins use a manual cause after the developer confirms. Candidate lists, model inputs, scores and feedback are outside this API.
 `GET /api/v2/workspaces/:ws/sessions` (cookie) includes origin in each `mine[].current_epoch`. When there is no current
 epoch, `mine[].last_epoch` gives `{origin}` from the most recent closed epoch if one exists, or null otherwise.
 For workspace owners, `all[]` includes `origin` of the current or most recent closed epoch and `origin_scope` ("current",
@@ -196,18 +196,85 @@ Requests and holds are sent from the web (cookie): `GET`/`POST /api/v2/workspace
 ## Activity (v2.2)
 In-flight work signals for agents toward related goals. Deterministic metadata from the user's own hooks, never model
 output, prompts, tool output or file contents.
-`POST /api/v2/workspaces/:ws/activity` (Bearer) `{ "items": [ { "session_key", "kind": "edit"|"commit"|"task"|"claim",
+`POST /api/v2/workspaces/:ws/activity` (Bearer) `{ "work_signals_version"?: 1|2, "items": [ { "session_key", "epoch_id"?: string|null, "kind": "edit"|"commit"|"task"|"claim",
 "at", "repo_id": hex, "path_hash": hex|null, "path": repo-relative string|null, "text": string|null } ] }` →
-`{ "accepted", "refused": [ { "index", "reason": "clock_skew"|"too_old"|"not_shared" } ], "server_time" }`.
+`{ "accepted", "refused": [ { "index", "reason": "clock_skew"|"too_old"|"not_shared"|"work_signals_off" } ], "server_time" }`.
 At most 200 items and 128 KB. Items for sessions this device didn't share, sessions not in `shared`, more than 5 minutes
 ahead or older than 24 h are skipped and listed in `refused`. `path` and `text` are sent only when the user turned on work signals (`align share ... --signals`);
-otherwise only `path_hash` goes up. `repo_id` = sha256(ws + "\0repo\0" + normalized git remote) so clones on different
+otherwise only `path_hash` goes up. The server also requires consent recorded by the sharing device and permission from
+the workspace. Current clients include the protocol version with named fields. A device paired before the schema 32 migration can send its opted-in names using the earlier request
+shape (without `work_signals_version`) until an explicit session choice is recorded. The workspace ban still applies.
+Other legacy requests with names receive an update message in the refusal reason. `repo_id` = sha256(ws + "\0repo\0" + normalized git remote) so clones on different
 machines match; `path_hash` = sha256(repo_id + "\0" + repo-relative path). Absolute and `..` paths are refused.
-Kept 24 hours; a `claim` 1 hour. The session's open epoch's goal is recorded with each item.
+Kept 24 hours, or one hour for a claim. With version 2, a named item names the epoch in effect when it
+was recorded. The server checks it against the recorded time. Earlier requests resolve an epoch by recorded time.
+When the epoch cannot be established, only otherwise eligible metadata is accepted. The agent retries edits,
+claims and commits without names after a refusal of work signals.
 `GET /api/v2/workspaces/:ws/activity?after=<seq>` (Bearer) → `{ "cursor", "items": [ { "seq", "session_key", "harness",
 "user": { "id", "name" }, "mine", "goal_id", "repo_id", "kind", "path_hash", "path", "text", "at", "expires_at" } ] }`,
 oldest first, at most 500, only items on goals the caller can read (an unbound session's items only to its own user).
 The agent uploads and fetches inside the normal hook-started sync pass; hooks read the cached copy.
+
+## Session sharing choices
+
+The authority for tier contents is [Nothing private leaves the machine](../../../../../specs/align/local-agent.md#requirement-nothing-private-leaves-the-machine).
+`GET /api/v2/workspaces/:ws/data-sharing` returns `{blocked: [tier], model_check_blocked, decision_service: {url, revision} | null}`
+for a workspace the caller can access. Hosted mode omits a retained address that it would refuse on a new save.
+A goal suggestion dispatch read uses `?for=model-suggestion&phase=dispatch&recipient=<provider>` and requires
+permission to share sessions and a current device grant. It returns `{enabled, send_for_ms?, revision?, goals?,
+decision_service?}`. The goals in a grant contain only ids and titles and come from the authorization transaction.
+A workspace owner can `PATCH` with `{tier, blocked}` for tiers 1 through 4, `{model_check_blocked}` for
+the independent model check block, or `{decision_service_url: string | null}` to set or clear the shared service.
+Each address change expires consent to its earlier revision. The audit action records a service change without the address. Migration 33 adds the decision service setting.
+Migration 34 adds independent model check blocks, send windows and excerpt sharing.
+The sharing device records tier 1 with `PUT /api/v2/workspaces/:ws/sessions/:key/work-signals` and
+`{enabled: true|false}`. The returned `enabled` is false if the workspace prohibits a new opt-in.
+`?phase=dispatch&epoch=<id>` on an enabled request issues a short window and lists the requested epochs
+whose goals the sender can read. The epoch parameter can be repeated.
+
+In Mode L, `PUT /api/v2/devices/self/data-sharing` with `{enabled: true|false}` sets proposed tier 2 consent for the
+calling device. Hosted Align refuses opt-ins and uploads with 403 `results_unavailable`.
+`GET /api/v2/workspaces/:ws/sessions/:key/analysis?status=1` returns `{available, enabled, enabled_since}`.
+`available` is false in hosted mode. `enabled` also checks the device grant, current workspace role, session state,
+device consent and workspace ban. `enabled_since` is the start of the current consent period when enabled, or null.
+A dispatch request adds `epoch=<id>&phase=dispatch`. That epoch must be readable and the response adds
+`send_for_ms` and `revision`. To use an upload acknowledgement, the client rechecks the same epoch with
+`phase=answer&revision=<grant revision>`. Without the query, the response includes the device's own readable
+findings in local mode.
+
+`POST` accepts exactly `id`, `epoch_id`, `goal_version`, `limit_id`, `evidence`, `digest` and `turn_started_at`.
+The id and keyed digest are 32 lowercase hex characters. Evidence is one of `wording`, `example`, `tool`, `file`,
+`git` or `model`. The reported turn start is an ISO timestamp with milliseconds in UTC, later than the server's current
+consent time. A matching retry is acknowledged while the finding is available. Findings expire 30 days from
+the turn start. Deleted and expired findings return 410 `finding_gone` on replay.
+`DELETE ?before=<turn cutoff>` removes the sharing device's findings at or before that time and returns 204.
+The same cutoff can be retried without affecting later turns. It also returns 204 when the sharer's authorized
+request reaches a marker for deleted session history. Other requests outside the device's scope receive 404.
+This API accepts only the finding fields above.
+
+`POST /api/v2/workspaces/:ws/sessions/:key/model-check?phase=dispatch&epoch=<id>` grants a short dispatch window
+(`{enabled, send_for_ms?, revision?, decision_service?}`) to the sharing device when the epoch's goal is still readable.
+Both decisions go directly from the device to its selected recipient. The device measures each dispatch window from
+before its authorization request and starts at most one request within 750 ms. Before using an answer it calls
+the same endpoint with `phase=answer&revision=<grant revision>` and the same recipient or epoch. A saved block or
+relevant authorization change invalidates earlier answers. Blocks and permission changes wait for applicable dispatch
+windows before they are saved. Requests without a phase receive no dispatch grant. Schema 35 starts with no usable
+grants from older clients.
+
+`PUT /api/v2/devices/self/data-sharing` with `{tier: 4, enabled: true|false, revision}` sets proposed
+excerpt consent on the device. The device increments its revision before each command. The server applies only
+a greater revision and returns its current `{enabled, revision}`. At `/api/v2/workspaces/:ws/sessions/:key/excerpts` the sharing device gets `{enabled, readers}`
+and the confirmed upload obtains a short window using `GET ?phase=dispatch`. A successful grant adds
+`send_for_ms` and a dispatch revision to the response. The device starts the upload within that window
+and checks the revision with `phase=answer` before using the acknowledgement. It can POST exactly
+`{id, text, purpose, readers, hours}`, with the current consent revision in a quoted
+`If-Match` header. Reader ids name current members. The id is
+`ex_` followed by 32 lowercase hex characters. Repeating the same share id and details returns its original expiry.
+Expired or revoked shares cannot be reopened with the same id, even after their audit history expires.
+
+Browser sessions use `GET /api/v2/workspaces/:ws/excerpts` for active excerpts shared by or with that person.
+`GET /api/v2/workspaces/:ws/excerpts/:id` also returns the text. The sharer can DELETE it at the same address.
+Other callers receive 404. Excerpt responses disable caching and the share event carries no content.
 
 ## Asks (PORT-003)
 What a team was asked to do by someone else, recorded by a person from a meeting or by hand. An ask belongs to the

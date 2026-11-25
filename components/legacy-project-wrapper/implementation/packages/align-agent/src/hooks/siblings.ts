@@ -33,6 +33,8 @@ const HARD_BYTES = 4 * 1024 * 1024;
 export interface Act {
   t: "edit" | "read" | "commit" | "task" | "claim" | "warned" | "noted" | "ran" | "failed";
   at: string;
+  root?: string;
+  epoch?: string;
   /** Absolute path for edit, read, claim and warned. */
   p?: string;
   /** Commit subject or task label. */
@@ -46,6 +48,8 @@ export interface Act {
    *  PostToolUse hook saw it run or fail, or its evidence was checked (`hooks/evidence.ts`), for one file (`p`), the
    *  commit (`p: "#commit"`) or the whole call. */
   u?: string;
+  /** The tool itself reported this outcome. */
+  tool_verdict?: 1;
   /** edit, commit: recorded by a Claude Code plugin that installs PostToolUse, so it counts only once that hook saw
    *  its own call run (A2-local-1). */
   c?: 1;

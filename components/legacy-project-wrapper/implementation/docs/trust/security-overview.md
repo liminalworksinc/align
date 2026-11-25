@@ -4,14 +4,14 @@
 > what Align does today and, at the end, what it does not do yet. [LEGAL ENTITY] publishes it. Report a security
 > problem to [SECURITY CONTACT EMAIL].
 
-Align keeps goals, who may change them, and the coding agents working toward them in step. It never needs to see
-what people say to their agents: the server stores no prompt text, tool output, messages or code.
+Align keeps goals, who may change them, and the coding agents working toward them in step. Session transcripts
+stay on the machine where the session ran. The excerpts and model checks described below require separate choices.
 
 ## In short
 
 - One server on one Fly.io machine, behind Fly's HTTPS edge, with one SQLite database on a Fly volume that Fly
   encrypts at rest.
-- No prompts, tool output, messages, code or file contents are stored on the server.
+- The server stores session text only when someone confirms a selected excerpt.
 - People sign in as themselves: an emailed one-time code, Google, GitHub, or a passkey. There are no passwords.
 - Sessions last 7 days from last use and never more than 30 days from sign-in. Sensitive actions need a sign-in from
   the last 15 minutes. "Sign out everywhere" ends every session at once.
@@ -21,7 +21,7 @@ what people say to their agents: the server stores no prompt text, tool output, 
 - Connected AI apps get read-only access to one workspace, as the person who connected them; adding evidence links
   needs a separate scope.
 - Data is deleted on a published schedule ([retention](../RETENTION.md)), and an account can be deleted in the app.
-- Local mode keeps everything on the person's own machine.
+- Local mode runs the Align server on your machine. If you opt in to model limit checks, the final reply goes to the decision service your workspace owner configures.
 - Not yet: SOC 2, ISO 27001, a penetration test, SSO/SAML/SCIM. See "Not yet" below.
 
 ## Architecture
@@ -33,19 +33,42 @@ what people say to their agents: the server stores no prompt text, tool output, 
 | Database | One SQLite file, `/data/v2/align.sqlite`, file mode 0600 in a 0700 directory, on a Fly volume. Fly states that volumes are created with encryption at rest by default; that is Fly's control, not Align's. <!-- lib/v2/db.ts; https://fly.io/docs/volumes/overview/ --> |
 | Image | Built from an allowlisted context: no tests, docs, local agent packages or `.env` files reach the image. It runs as the unprivileged `node` user. <!-- Dockerfile; .dockerignore --> |
 | Secrets | `ALIGN_SECRET`, `BETTER_AUTH_SECRET` (32+ characters each), the email API key and any Google, GitHub or Turnstile secrets are set with `fly secrets`, never in the repository or the image. A server missing a required setting refuses to start. <!-- lib/config.ts; lib/v2/config.ts v2Problems --> |
-| Outside services | Fly.io, the configured email API (Resend by default), Cloudflare Turnstile when enabled, and Google and GitHub for sign-in when configured. No AI model provider. See [subprocessors](subprocessors.md). |
+| Outside services | Fly.io, the configured email API (Resend by default), Cloudflare Turnstile when enabled, and Google and GitHub for sign-in when configured. The server makes no model requests. See [subprocessors](subprocessors.md). |
 
 ## What Align stores, and what it does not
 
 | Stored | Not stored |
 | --- | --- |
 | Account: email, name, profile picture address from Google or GitHub, linked sign-in methods, passkeys (public keys) | Passwords (there are none) |
-| Workspace: members and roles, teams, invites, goals and their versions, alignments, change requests and decisions, directives | Prompt text, tool output, messages, code, file contents |
+| Workspace: members and roles, teams, invites, goals and their versions, alignments, change requests and decisions, directives | Full transcripts and automated copies of prompt text, tool output, replies, code and files |
 | Shared sessions: harness, a hashed repository key, an optional repository alias, times, state, goal binding, token usage and estimated cost | A session title: the `align` agent sends none <!-- docs/RETENTION.md --> |
-| Work signals for 24 hours: keyed hashes of files touched; file paths and short text only if the person turns on "share work signals" | Anything from a session the person did not choose to share |
-| Change request evidence: typed links (pull request, CI run, incident, dashboard, document or other) labelled self-reported or agent-reported, and a goal snapshot Align computes itself | Any claim that evidence is verified: Align labels it, it does not check it |
+| File hashes for edits and claims. Work signals add repo-relative paths, branch names, commit subjects and task or claim labels for people who can read the goal. Claims expire at one hour and other activity at 24 hours. | Anything from a session the person did not choose to share |
+| Change request evidence: typed links (pull request, CI run, incident, dashboard, document or other) labelled self-reported or agent-reported, and a goal snapshot Align computes itself | Evidence ratings or independent fact checks |
 | Product events: an event name, the workspace, a keyed hash of the person, the time and a few allowlisted properties | Emails, names, titles, URLs or tokens in those events |
 | Audit log: who did what to which object, and when | The content of goals or requests in the audit log |
+
+## Proposed session sharing choices
+
+Metadata is the default for a shared session. Work signals are a separate choice for a session or folder.
+With hosted Align, derived findings stay on the machine. The proposed option to send them is off by default
+and only works with a local Align server. When a person turns it on, the local server can receive finding,
+binding and limit ids, the goal version, the turn start time, an evidence label and a keyed digest for new
+turns. Only the sharing device can read these records. The person can delete them at any time and they expire after 30 days. Workspace owners can block the option.
+
+A local installation reads the original transcript files, which stay on the machine.
+
+The two proposed ways to use a model for goal suggestions start off. A session fork requires a way to keep the
+original provider and account. The current integrations abstain. A separately enabled decision model receives the
+first prompt, branch when known, saved repo alias and eligible goal ids and titles directly from the device.
+A workspace owner sets the workspace's own service address. Each person chooses that address on their machine
+and chooses again after it changes. The workspace can block both choices.
+The proposed recipients are listed in [subprocessors](subprocessors.md). Align receives the goal and sharing
+source only when the person confirms.
+
+Model limit checks and deliberate excerpts are proposed, separate choices. An opted-in model check sends the
+final assistant reply up to 2,000 bytes and the wording and type of up to ten limits from the machine to the workspace decision service shown in its preview. The request goes directly from the device. An excerpt requires a preview and confirmation of the selected text,
+readers, purpose and expiry. Only the sharer and named readers can see it. The sharer can revoke it at any time. The selected expiry can be up to seven days.
+Hosted workspaces cannot receive full transcripts. Workspace owners can block model checks and new excerpts.
 
 ## Signing in
 
