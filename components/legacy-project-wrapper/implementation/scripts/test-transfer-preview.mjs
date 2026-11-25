@@ -28,6 +28,10 @@ else process.env.ALIGN_PREVIEW_TRANSFER_UI = saved;
 for (const page of ["outbox", "receipt"]) {
   const src = readFileSync(path.join(ROOT, "app/app/w/[ws]", page, "page.tsx"), "utf8");
   check(`the ${page} page is not found unless the preview is on`, /if \(!transferPreviewEnabled\(\)\) notFound\(\);/.test(src));
+  // Found in review on Nov 25: checked in the page's static part, the build baked "not found" in for good. The check must
+  // come after requireUser, which reads cookies and so makes the rest of the render per-request.
+  check(`the ${page} switch is read per request, after the sign-in check`,
+    src.indexOf("requireUser(") >= 0 && src.indexOf("transferPreviewEnabled()) notFound") > src.indexOf("requireUser("));
   const view = readFileSync(path.join(ROOT, "app/app/w/[ws]", page, "view.tsx"), "utf8");
   check(`the ${page} view says it is stand-in data and sends nothing`, /Preview with stand-in data\. Nothing here is sent/.test(view));
   check(`the ${page} view makes no request`, !/\bapi\(|fetch\(|useApi\(/.test(view));
