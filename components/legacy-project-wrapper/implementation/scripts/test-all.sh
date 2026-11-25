@@ -36,6 +36,8 @@ step paste-lines node scripts/test-paste-lines.mjs
 step test-admin node scripts/test-admin.mjs
 step invite-races node scripts/test-invite-races.mjs
 step budgets node scripts/test-budgets.mjs
+# LIM-2529 outbox and receipt preview: off by default, stand-in data keeps the spec's rules (no server).
+step transfer-preview node scripts/test-transfer-preview.mjs
 
 # ---- servers: each test starts its own production servers on <port> ----
 # The v2 server (docs/v2/WIRE.md): Mode L sign-in and local owner, the edge, Mode L with the test identity provider, hosted.
@@ -66,6 +68,7 @@ count "$LOGDIR/test-oauth.log" '^test-oauth: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/paste-lines.log" '^test-paste-lines: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-admin.log" '^test-admin: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/budgets.log" '^test-budgets: ([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/transfer-preview.log" '^test-transfer-preview: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/invite-races.log" '^test-invite-races: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-agent-live.log" '^([0-9]+) passed, ([0-9]+) failed$'
 AGENT_PASS="$(grep -Eo '^(#|ℹ) pass [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
