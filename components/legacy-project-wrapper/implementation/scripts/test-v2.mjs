@@ -78,6 +78,14 @@ function check(name, ok, detail = "") {
   else fail++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  ${clip(detail)}`}`);
 }
+/** LIM-2529 acceptance checks whose enforcement isn't built yet: a miss prints PEND and doesn't fail the run, until
+ *  ALIGN_ENFORCE_TRANSFER=1 (set once the enforcement side lands) makes them ordinary checks. */
+let pend = 0;
+function pending(name, ok, detail = "") {
+  if (ok || process.env.ALIGN_ENFORCE_TRANSFER === "1") return check(name, ok, detail);
+  pend++;
+  console.log(`PEND  ${name}  ${clip(detail)}`);
+}
 
 // ---- HTTP: every response is kept per caller, so the private-goal canary can be checked across all of them ----
 const seen = []; // { who, text }
@@ -6428,6 +6436,48 @@ try {
     const suggestionBlocked = await excerptDevice("GET", suggestionUrl);
     const modelStillAllowed = await excerptDevice("POST", modelUrl);
     await restrictSharing(KO, AK, 3, false);
+
+    {
+      // LIM-2529 acceptance (specs/align/transfer-authorization.md, ratified Nov 25): an agent holding only a device
+      // token must not be able to approve itself or hold off its owner. These are PEND until the enforcement side lands;
+      // ALIGN_ENFORCE_TRANSFER=1 makes them hard checks. A fresh device keeps its own consent revisions, so nothing here
+      // changes the state the checks around it rely on.
+      // Written straight into the database (the pairing limit is spent by this point in the run), then granted the
+      // workspace, the way a real pairing would.
+      const attDev = insertDevice(KM.id, "attacker's agent");
+      withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(attDev.id, AK));
+      const ATT = { ...attDev, who: "attacker" };
+      const asAgent = (method, url, body) => call(ATT.who, method, url, { bearer: ATT.access, body });
+      const selfOn = await asAgent("PUT", "/api/v2/devices/self/data-sharing", { tier: 4, enabled: true, revision: 1 });
+      pending("LIM-2529: a device token cannot turn excerpt sharing on (403 consent_requires_person)",
+        selfOn.status === 403 && selfOn.json?.error === "consent_requires_person", `${selfOn.status} ${selfOn.text}`);
+      await asAgent("PUT", "/api/v2/devices/self/data-sharing", { tier: 4, enabled: false, revision: 2 });
+      const selfResults = await asAgent("PUT", "/api/v2/devices/self/data-sharing", { enabled: true });
+      pending("LIM-2529: a device token cannot turn derived results on (403 consent_requires_person)",
+        selfResults.status === 403 && selfResults.json?.error === "consent_requires_person", `${selfResults.status} ${selfResults.text}`);
+      const unreleased = await asAgent("GET", suggestionUrl);
+      pending("LIM-2529: with ALIGN_TRANSFER_CAPABILITIES unset, a vendor suggestion is not released (403 capability_not_released)",
+        unreleased.status === 403 && unreleased.json?.error === "capability_not_released", `${unreleased.status} ${unreleased.text}`);
+      const grantRoute = await asAgent("POST", `/api/v2/workspaces/${AK}/grants`, { capability: "excerpt", session_key: kSA.key, digest: "0".repeat(64) });
+      pending("LIM-2529: the grant endpoint exists and refuses a device that does not own the session",
+        grantRoute.status !== 404 && grantRoute.status >= 400 && grantRoute.status < 500, `${grantRoute.status} ${grantRoute.text}`);
+      // The owner-lockout attack: the agent keeps requesting dispatch while its person revokes it. Revocation must commit
+      // at once, not wait on the agent (the migration 35 triggers that hold policy changes are to be removed).
+      let polling = true;
+      const poll = (async () => { while (polling) { await asAgent("GET", suggestionUrl); await sleep(250); } })();
+      await sleep(400);
+      const started = Date.now();
+      const revoke = await call(KM.who, "DELETE", `/api/v2/devices/${ATT.id}`, { cookie: KM.cookie });
+      const tookMs = Date.now() - started;
+      polling = false;
+      await poll;
+      pending("LIM-2529: an agent requesting dispatch cannot hold off its own revocation (200 in under 1 s)",
+        revoke.status === 200 && tookMs < 1000, `${revoke.status} after ${tookMs} ms ${revoke.text.slice(0, 200)}`);
+      if (revoke.status !== 200) {
+        await sleep(1000); // let the last window lapse, then clean up so later checks see the same devices
+        await call(KM.who, "DELETE", `/api/v2/devices/${ATT.id}`, { cookie: KM.cookie });
+      }
+    }
 
     check("LIM-2528: model policy reads belong to the sharing device and honor its own owner-set block",
       modelAllowed.json?.enabled === true && modelAllowed.json?.send_for_ms === 750
@@ -17231,5 +17281,6 @@ try {
   rmSync(tmpRoot, { recursive: true, force: true });
 }
 
+if (pend) console.log(`\n${pend} LIM-2529 acceptance checks pending (enforcement not built yet; ALIGN_ENFORCE_TRANSFER=1 makes them hard)`);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
