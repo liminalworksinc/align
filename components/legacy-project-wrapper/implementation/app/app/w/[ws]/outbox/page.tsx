@@ -6,7 +6,7 @@ import { NotInWorkspace } from "../../../_ui/missing";
 import { Loading } from "../sessions/parts";
 import Outbox from "./view";
 
-// LIM-2529 experience preview: the author's outbox (spec #117). Off unless ALIGN_PREVIEW_TRANSFER_UI=1; stand-in data only.
+// LIM-2529 experience preview, the author's outbox (spec #117). Off unless ALIGN_PREVIEW_TRANSFER_UI=1; stand-in data only.
 export default function Page({ params }: PageProps<"/app/w/[ws]/outbox">) {
   return <Suspense fallback={<Loading />}><Inner params={params} /></Suspense>;
 }

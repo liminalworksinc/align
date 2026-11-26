@@ -6,7 +6,7 @@ import { NotInWorkspace } from "../../../_ui/missing";
 import { Loading } from "../sessions/parts";
 import Receipt from "./view";
 
-// LIM-2529 experience preview: the weekly receipt (spec #117). Off unless ALIGN_PREVIEW_TRANSFER_UI=1; stand-in data only.
+// LIM-2529 experience preview, the weekly receipt (spec #117). Off unless ALIGN_PREVIEW_TRANSFER_UI=1; stand-in data only.
 export default function Page({ params }: PageProps<"/app/w/[ws]/receipt">) {
   return <Suspense fallback={<Loading />}><Inner params={params} /></Suspense>;
 }
